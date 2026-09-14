@@ -357,9 +357,7 @@ async function gh(path, method = 'GET', body = null) {
   if (!token) throw new Error('请先填写 GitHub Token');
   const headers = { Authorization: 'token ' + token, 'User-Agent': 'album-tool', Accept: 'application/vnd.github+json' };
   if (method === 'GET') {
-    // 强制绕过 GitHub API 缓存，确保删除/添加后立即拿到最新数据
-    headers['Cache-Control'] = 'no-cache';
-    headers['Pragma'] = 'no-cache';
+    // 附加时间戳参数让 URL 每次不同，绕过 GitHub API 缓存；不能用自定义请求头（会触发 CORS 预检失败）
     path = path + (path.includes('?') ? '&' : '?') + '_ts=' + Date.now();
   }
   const opts = { method, headers, cache: 'no-store' };
