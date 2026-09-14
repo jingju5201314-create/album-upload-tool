@@ -190,6 +190,15 @@
   </div>
 
   <div class="card">
+    <label>删除整个相册</label>
+    <div class="manage-bar">
+      <button class="btn btn-danger" id="deleteAlbumBtn" type="button">删除整个相册文件夹</button>
+    </div>
+    <div id="deleteAlbumStatus" style="margin-top:10px"></div>
+    <div class="hint">删除 <code>albums/&lt;相册名&gt;/</code> 下的全部文件（相册和所有图片都会从博客消失）。此操作不可恢复，需输入相册名二次确认</div>
+  </div>
+
+  <div class="card">
     <label for="links">图片链接（每行一个，可批量粘贴）</label>
     <textarea id="links" placeholder="https://example.com/1.webp&#10;https://example.com/2.webp"></textarea>
     <div id="preview"></div>
@@ -489,6 +498,59 @@ async function deleteMarked() {
 
 $('loadManageBtn').addEventListener('click', loadManage);
 $('deleteMarkedBtn').addEventListener('click', deleteMarked);
+
+// ---- 删除整个相册 ----
+async function listAlbumFiles(albumId) {
+  const path = `/repos/${OWNER_REPO}/contents/albums/${albumId}?ref=${BRANCH}`;
+  const items = await gh(path);
+  return items.filter(i => i.type === 'file').map(i => ({ path: i.path, sha: i.sha }));
+}
+
+async function deleteAlbum() {
+  const token = $('token').value.trim();
+  const albumId = $('albumId').value.trim();
+  const box = $('deleteAlbumStatus');
+  if (!token) { box.innerHTML = '<div class="hint" style="color:var(--danger)">请先填写 GitHub Token</div>'; return; }
+  if (!albumId) { box.innerHTML = '<div class="hint" style="color:var(--danger)">请先在上方填写要删除的相册名</div>'; return; }
+  if (!/^[a-zA-Z0-9-_]+$/.test(albumId)) { box.innerHTML = '<div class="hint" style="color:var(--danger)">相册名只能包含字母、数字、短横线、下划线</div>'; return; }
+
+  const typed = prompt('⚠️ 即将永久删除相册「' + albumId + '」（含全部图片）。\n此操作不可恢复！\n\n请输入相册名确认删除：');
+  if (typed === null) return; // 取消
+  if (typed.trim() !== albumId) {
+    box.innerHTML = '<div class="hint" style="color:var(--danger)">输入的名字与相册名不一致，已取消删除</div>';
+    return;
+  }
+
+  $('deleteAlbumBtn').disabled = true;
+  box.innerHTML = '<div class="hint">正在删除…</div>';
+  try {
+    const files = await listAlbumFiles(albumId);
+    if (files.length === 0) {
+      box.innerHTML = '<div class="hint">相册「' + esc(albumId) + '」不存在或已为空，无需删除</div>';
+      return;
+    }
+    let deleted = 0;
+    for (const f of files) {
+      const body = { message: 'album: delete folder ' + albumId + ' (' + f.path.split('/').pop() + ')', sha: f.sha };
+      await gh(`/repos/${OWNER_REPO}/contents/${f.path}`, 'DELETE', body);
+      deleted++;
+    }
+    box.innerHTML = '<div class="hint" style="color:var(--success)">已删除相册「' + esc(albumId) + '」的 ' + deleted + ' 个文件。回到博客三连击 logo 刷新缓存生效</div>';
+    // 清理 UI
+    $('manageGrid').innerHTML = '';
+    $('manageCount').textContent = '';
+    manageAlbum = null; manageSha = null; manageMarked = new Set();
+    $('deleteMarkedBtn').disabled = true;
+    await new Promise(r => setTimeout(r, 800));
+    loadAlbums();
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--danger)">删除失败：' + esc(e.message) + '</div>';
+  } finally {
+    $('deleteAlbumBtn').disabled = false;
+  }
+}
+
+$('deleteAlbumBtn').addEventListener('click', deleteAlbum);
 
 // ---- 提交 ----
 $('submitBtn').addEventListener('click', async () => {
