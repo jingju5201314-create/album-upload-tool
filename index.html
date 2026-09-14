@@ -74,6 +74,27 @@
   #preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 12px; }
   .pitem { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); aspect-ratio: 1; }
   .pitem img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pitem .pdel {
+    position: absolute; top: 4px; right: 4px; width: 24px; height: 24px;
+    background: rgba(0,0,0,.55); color: #fff; border: none; border-radius: 50%;
+    cursor: pointer; font-size: 13px; line-height: 1; display: flex; align-items: center; justify-content: center;
+    z-index: 2;
+  }
+  .pitem .pdel:hover { background: var(--danger); }
+  .pitem.marked { opacity: .45; border: 2px solid var(--danger); }
+  .pitem.marked::after {
+    content: "已标记删除"; position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--danger); color: #fff; font-size: 11px; text-align: center; padding: 2px 0;
+    z-index: 2;
+  }
+  .manage-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .manage-bar .btn { min-height: 40px; }
+  #manageCount { font-size: 13px; color: var(--muted); }
+  .btn-ghost { background: #eef0f7; color: var(--text); }
+  .btn-ghost:hover { background: #e2e5f0; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #b53a3a; }
+  .btn-danger:disabled { background: #e8a3a3; cursor: not-allowed; }
   details { margin-top: 14px; }
   summary { cursor: pointer; font-size: 13px; color: var(--muted); user-select: none; padding: 4px 0; }
   details .adv-body { margin-top: 6px; }
@@ -116,6 +137,20 @@
     <datalist id="albumList"></datalist>
     <div class="chip-row" id="albumChips"></div>
     <div class="hint">输入已有相册名会追加图片；新名字会自动创建相册。也可以点上面的标签快速选择</div>
+  </div>
+
+  <div class="card">
+    <label>管理相册图片（删除）</label>
+    <div class="manage-bar">
+      <button class="btn btn-ghost" id="loadManageBtn" type="button">加载相册图片</button>
+      <span id="manageCount"></span>
+    </div>
+    <div id="manageGrid"></div>
+    <div class="manage-bar">
+      <button class="btn btn-danger" id="deleteMarkedBtn" type="button" disabled>删除已标记的图片</button>
+    </div>
+    <div id="manageStatus" style="margin-top:10px"></div>
+    <div class="hint">点图片右上角的 ✕ 标记要删除的图（可多选），再点"删除已标记的图片"保存。删除前会弹窗确认</div>
   </div>
 
   <div class="card">
@@ -244,6 +279,115 @@ function esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+
+// ---- 管理相册图片（删除）----
+let manageAlbum = null;      // 当前管理的相册 JSON
+let manageSha = null;        // 当前相册文件 sha
+let manageMarked = new Set(); // 标记删除的图片 id
+
+async function loadManage() {
+  const token = $('token').value.trim();
+  const albumId = $('albumId').value.trim();
+  const box = $('manageGrid');
+  box.innerHTML = '';
+  $('manageCount').textContent = '';
+  $('deleteMarkedBtn').disabled = true;
+  $('manageStatus').innerHTML = '';
+  manageMarked = new Set();
+  if (!token) { $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请先填写 GitHub Token</div>'; return; }
+  if (!albumId) { $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请先在上方填写相册名</div>'; return; }
+
+  $('loadManageBtn').disabled = true;
+  try {
+    const found = await getAlbumInfo(albumId);
+    if (!found) {
+      $('manageStatus').innerHTML = '<div class="hint">相册 <b>' + esc(albumId) + '</b> 不存在，无法管理</div>';
+      return;
+    }
+    manageAlbum = found.json;
+    manageSha = found.data.sha;
+    const photos = manageAlbum.photos || [];
+    $('manageCount').textContent = '共 ' + photos.length + ' 张图片';
+    if (photos.length === 0) {
+      box.innerHTML = '<div class="hint">该相册暂无图片</div>';
+      return;
+    }
+    photos.forEach((p, i) => {
+      const item = document.createElement('div');
+      item.className = 'pitem';
+      item.dataset.pid = p.id;
+      const img = document.createElement('img');
+      img.src = p.src;
+      img.alt = p.title || '';
+      img.loading = 'lazy';
+      img.onerror = () => { img.style.opacity = '.25'; };
+      const del = document.createElement('button');
+      del.className = 'pdel';
+      del.textContent = '✕';
+      del.title = '标记删除';
+      del.onclick = () => {
+        const pid = item.dataset.pid;
+        if (manageMarked.has(pid)) {
+          manageMarked.delete(pid);
+          item.classList.remove('marked');
+        } else {
+          manageMarked.add(pid);
+          item.classList.add('marked');
+        }
+        $('deleteMarkedBtn').disabled = manageMarked.size === 0;
+      };
+      item.appendChild(img);
+      item.appendChild(del);
+      box.appendChild(item);
+    });
+  } catch (e) {
+    $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">加载失败：' + esc(e.message) + '</div>';
+  } finally {
+    $('loadManageBtn').disabled = false;
+  }
+}
+
+async function deleteMarked() {
+  if (!manageAlbum || manageMarked.size === 0) return;
+  const albumId = $('albumId').value.trim();
+  const markedIds = [...manageMarked];
+  const total = (manageAlbum.photos || []).length;
+  if (!confirm('确定从相册「' + albumId + '」删除 ' + markedIds.length + ' 张图片吗？\n此操作会提交到 GitHub 仓库，删除后需刷新缓存生效。')) return;
+
+  $('deleteMarkedBtn').disabled = true;
+  $('manageStatus').innerHTML = '<div class="hint">正在删除…</div>';
+  try {
+    manageAlbum.photos = (manageAlbum.photos || []).filter(p => !markedIds.includes(p.id));
+    // 如果删掉了封面，封面换成第一张图
+    if (manageAlbum.cover && manageAlbum.photos.length > 0) {
+      const coverSrc = manageAlbum.photos[0].src;
+      const oldCover = manageAlbum.cover;
+      if (!manageAlbum.photos.some(p => p.src === oldCover)) {
+        manageAlbum.cover = coverSrc;
+      }
+    }
+    if (manageAlbum.photos.length === 0) manageAlbum.cover = '';
+
+    const raw = JSON.stringify(manageAlbum, null, '\t');
+    const newContent = raw.split('\n').map(l => l.replace(/\s+$/, '')).join('\n') + '\n';
+    const putBody = {
+      message: 'album: delete ' + markedIds.length + ' photo(s) from ' + albumId,
+      content: btoa(unescape(encodeURIComponent(newContent))),
+      branch: BRANCH
+    };
+    if (manageSha) putBody.sha = manageSha;
+    const result = await gh(`/repos/${OWNER_REPO}/contents/albums/${albumId}/info.json`, 'PUT', putBody);
+    $('manageStatus').innerHTML = '<div class="hint" style="color:var(--success)">已删除 ' + markedIds.length + ' 张（剩余 ' + manageAlbum.photos.length + ' 张）。回到博客三连击 logo 刷新缓存生效</div>';
+    await loadManage(); // 重新加载
+    loadAlbums();
+  } catch (e) {
+    $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">删除失败：' + esc(e.message) + '</div>';
+    $('deleteMarkedBtn').disabled = false;
+  }
+}
+
+$('loadManageBtn').addEventListener('click', loadManage);
+$('deleteMarkedBtn').addEventListener('click', deleteMarked);
 
 // ---- 提交 ----
 $('submitBtn').addEventListener('click', async () => {
