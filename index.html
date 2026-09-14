@@ -38,6 +38,8 @@
     border: 1px solid var(--border);
   }
   label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 6px; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
   input[type="text"], input[type="password"], textarea {
     width: 100%;
     padding: 10px 12px;
@@ -196,6 +198,42 @@
     </div>
     <div id="deleteAlbumStatus" style="margin-top:10px"></div>
     <div class="hint">删除 <code>albums/&lt;相册名&gt;/</code> 下的全部文件（相册和所有图片都会从博客消失）。此操作不可恢复，需输入相册名二次确认</div>
+  </div>
+
+  <div class="card">
+    <label>上传日记</label>
+    <div class="row">
+      <div style="flex:1">
+        <label for="diaryDate" style="margin-top:0">日期（格式：2026-09-15）</label>
+        <input type="text" id="diaryDate" placeholder="2026-09-15">
+      </div>
+      <div style="flex:1">
+        <label for="diaryTime" style="margin-top:0">时间（可选，24小时制）</label>
+        <input type="text" id="diaryTime" placeholder="20:30">
+      </div>
+    </div>
+    <label for="diaryMood">心情（可选）</label>
+    <input type="text" id="diaryMood" placeholder="例如：晚风、开心、平静">
+    <div class="row">
+      <div style="flex:1">
+        <label for="diaryLocation">地点（可选）</label>
+        <input type="text" id="diaryLocation" placeholder="例如：城市天台">
+      </div>
+      <div style="flex:1">
+        <label for="diaryTags">标签（逗号分隔，可选）</label>
+        <input type="text" id="diaryTags" placeholder="日常, 夜景">
+      </div>
+    </div>
+    <label for="diaryImages">图片链接（每行一个，可选）</label>
+    <textarea id="diaryImages" placeholder="https://example.com/1.webp"></textarea>
+    <div id="diaryPreview"></div>
+    <label for="diaryContent">日记正文（支持 Markdown，每段空一行）</label>
+    <textarea id="diaryContent" style="min-height:140px" placeholder="今天发生的事情……"></textarea>
+    <div style="margin-top:12px">
+      <button class="btn btn-primary" id="submitDiaryBtn">上传日记</button>
+    </div>
+    <div id="diaryStatus" style="margin-top:10px"></div>
+    <div class="hint">日记会保存到 <code>diary/&lt;日期&gt;-&lt;序号&gt;/</code>，正文和图片可同时提交。上传后需刷新博客缓存生效</div>
   </div>
 
   <div class="card">
@@ -549,6 +587,125 @@ async function deleteAlbum() {
 }
 
 $('deleteAlbumBtn').addEventListener('click', deleteAlbum);
+
+// ---- 上传日记 ----
+async function getDiaryEntries() {
+  try {
+    const items = await gh(`/repos/${OWNER_REPO}/contents/diary?ref=${BRANCH}`);
+    return items.filter(i => i.type === 'dir').map(i => i.name);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function getDiaryMaxId() {
+  const entries = await getDiaryEntries();
+  let maxId = 0;
+  for (const name of entries) {
+    try {
+      const data = await gh(`/repos/${OWNER_REPO}/contents/diary/${name}/info.json?ref=${BRANCH}`);
+      const info = JSON.parse(atob(data.content));
+      if (typeof info.id === 'number' && info.id > maxId) maxId = info.id;
+    } catch (e) { /* 忽略单个日记读取失败 */ }
+  }
+  return maxId;
+}
+
+async function submitDiary() {
+  const token = $('token').value.trim();
+  const dateStr = $('diaryDate').value.trim();
+  const timeStr = $('diaryTime').value.trim();
+  const content = $('diaryContent').value.trim();
+  const images = $('diaryImages').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const mood = $('diaryMood').value.trim();
+  const location = $('diaryLocation').value.trim();
+  const tags = $('diaryTags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+
+  if (!token) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请先填写 GitHub Token</div>'; return; }
+  if (!dateStr) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请填写日期</div>'; return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">日期格式应为 YYYY-MM-DD，例如 2026-09-15</div>'; return; }
+  if (content.length === 0 && images.length === 0) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请至少填写正文或添加一张图片</div>'; return; }
+
+  $('submitDiaryBtn').disabled = true;
+  $('diaryStatus').innerHTML = '<div class="hint">正在上传…</div>';
+  try {
+    // 计算下一个 id
+    const maxId = await getDiaryMaxId();
+    const id = maxId + 1;
+    // 生成目录名：日期-序号
+    const folder = dateStr + '-' + id;
+
+    // 构造时间（默认 12:00）
+    let isoDate = dateStr;
+    if (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr)) {
+      isoDate = dateStr + 'T' + timeStr + ':00+08:00';
+    } else {
+      isoDate = dateStr + 'T12:00:00+08:00';
+    }
+
+    // info.json
+    const info = {
+      id: id,
+      date: isoDate,
+      images: images,
+      location: location,
+      mood: mood,
+      tags: tags
+    };
+    const infoRaw = JSON.stringify(info, null, '\t');
+    const infoContent = infoRaw.split('\n').map(l => l.replace(/\s+$/, '')).join('\n') + '\n';
+
+    // content.md
+    const mdContent = content ? content + '\n' : '';
+
+    // 依次上传两个文件
+    await gh(`/repos/${OWNER_REPO}/contents/diary/${folder}/info.json`, 'PUT', {
+      message: 'diary: add ' + folder,
+      content: btoa(unescape(encodeURIComponent(infoContent))),
+      branch: BRANCH
+    });
+    await gh(`/repos/${OWNER_REPO}/contents/diary/${folder}/content.md`, 'PUT', {
+      message: 'diary: add ' + folder + ' content',
+      content: btoa(unescape(encodeURIComponent(mdContent))),
+      branch: BRANCH
+    });
+
+    $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--success)">✅ 日记已上传（' + esc(folder) + '）' + (images.length > 0 ? '，含 ' + images.length + ' 张图片' : '') + '。<br>回到博客三连击 logo 刷新缓存后，日记页即可显示</div>';
+    // 清空表单
+    $('diaryDate').value = '';
+    $('diaryTime').value = '';
+    $('diaryMood').value = '';
+    $('diaryLocation').value = '';
+    $('diaryTags').value = '';
+    $('diaryImages').value = '';
+    $('diaryContent').value = '';
+    refreshDiaryPreview();
+  } catch (e) {
+    $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">上传失败：' + esc(e.message) + '</div>';
+  } finally {
+    $('submitDiaryBtn').disabled = false;
+  }
+}
+
+function refreshDiaryPreview() {
+  const urls = $('diaryImages').value.split('\n').map(s => s.trim()).filter(Boolean);
+  $('diaryPreview').innerHTML = '';
+  urls.slice(0, 24).forEach(u => {
+    const item = document.createElement('div');
+    item.className = 'pitem';
+    const img = document.createElement('img');
+    img.src = u;
+    img.alt = '';
+    img.onerror = () => { img.style.opacity = '.25'; };
+    item.appendChild(img);
+    $('diaryPreview').appendChild(item);
+  });
+}
+
+$('submitDiaryBtn').addEventListener('click', submitDiary);
+$('diaryImages').addEventListener('input', refreshDiaryPreview);
+// 默认填今天日期
+(function() { $('diaryDate').value = new Date().toISOString().slice(0, 10); })();
 
 // ---- 提交 ----
 $('submitBtn').addEventListener('click', async () => {
