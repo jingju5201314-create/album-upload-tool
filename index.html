@@ -347,7 +347,13 @@ async function gh(path, method = 'GET', body = null) {
   const token = $('token').value.trim();
   if (!token) throw new Error('请先填写 GitHub Token');
   const headers = { Authorization: 'token ' + token, 'User-Agent': 'album-tool', Accept: 'application/vnd.github+json' };
-  const opts = { method, headers };
+  if (method === 'GET') {
+    // 强制绕过 GitHub API 缓存，确保删除/添加后立即拿到最新数据
+    headers['Cache-Control'] = 'no-cache';
+    headers['Pragma'] = 'no-cache';
+    path = path + (path.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+  }
+  const opts = { method, headers, cache: 'no-store' };
   if (body) { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const res = await fetch(API + path, opts);
   const text = await res.text();
@@ -471,6 +477,8 @@ async function deleteMarked() {
     if (manageSha) putBody.sha = manageSha;
     const result = await gh(`/repos/${OWNER_REPO}/contents/albums/${albumId}/info.json`, 'PUT', putBody);
     $('manageStatus').innerHTML = '<div class="hint" style="color:var(--success)">已删除 ' + markedIds.length + ' 张（剩余 ' + manageAlbum.photos.length + ' 张）。回到博客三连击 logo 刷新缓存生效</div>';
+    // 等待 1.2 秒让 GitHub 服务端完成同步，再强制绕过缓存刷新
+    await new Promise(r => setTimeout(r, 1200));
     await loadManage(); // 重新加载
     loadAlbums();
   } catch (e) {
