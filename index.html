@@ -115,10 +115,46 @@
   @media (max-width: 640px) {
     input, textarea { font-size: 16px; }
   }
+  /* ---- 登录界面 ---- */
+  #loginOverlay {
+    position: fixed; inset: 0; z-index: 999;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  #loginOverlay.hidden { display: none; }
+  .login-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 32px 28px;
+    width: 100%; max-width: 380px;
+    box-shadow: 0 2px 16px rgba(45, 49, 66, 0.1);
+    border: 1px solid var(--border);
+  }
+  .login-card h2 { font-size: 20px; margin-bottom: 4px; }
+  .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .login-err { display: none; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: #fdeaea; color: var(--danger); font-size: 13px; border: 1px solid #f3c2c2; }
+  .login-err.show { display: block; }
+  #loginBtn { width: 100%; margin-top: 8px; }
+  #appBody { display: none; }
 </style>
 </head>
 <body>
-<div class="container">
+<!-- 登录验证 -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <h2>登录</h2>
+    <div class="sub">相册图片添加工具需要验证身份</div>
+    <label for="loginUser">账号</label>
+    <input type="text" id="loginUser" placeholder="请输入账号" autocomplete="username">
+    <label for="loginPass">密码</label>
+    <input type="password" id="loginPass" placeholder="请输入密码" autocomplete="current-password">
+    <div class="login-err" id="loginErr">账号或密码错误</div>
+    <button class="btn btn-primary" id="loginBtn">登 录</button>
+  </div>
+</div>
+
+<div class="container" id="appBody">
   <h1>相册图片添加工具</h1>
   <div class="subtitle">粘贴图片链接 → 写入博客相册。提交后到博客页面 3 秒内连点左上角 logo 3 次刷新缓存即可显示</div>
 
@@ -182,22 +218,79 @@
 </div>
 
 <script>
+const $ = id => document.getElementById(id);
+
+// ---- 登录验证 ----
+// 账号/密码的 SHA-256 哈希（jingju520 / jingju520），不存明文
+const AUTH_HASH = '2e291d7261f72b8e2c5264f915647f41adb15e2d9b1480d146f3231833b377f6';
+const LS_AUTH = 'album_tool_auth';
+
+async function sha256Hex(text) {
+  const data = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function tryLogin(user, pass) {
+  if (!user || !pass) return false;
+  const u = await sha256Hex(user);
+  const p = await sha256Hex(pass);
+  return u === AUTH_HASH && p === AUTH_HASH;
+}
+
+async function doLogin() {
+  const user = $('loginUser').value.trim();
+  const pass = $('loginPass').value;
+  const ok = await tryLogin(user, pass);
+  if (ok) {
+    sessionStorage.setItem(LS_AUTH, '1');
+    showApp();
+  } else {
+    $('loginErr').classList.add('show');
+    $('loginPass').value = '';
+  }
+}
+
+function showApp() {
+  $('loginOverlay').classList.add('hidden');
+  $('appBody').style.display = 'block';
+  initApp();
+}
+
+function guardInit() {
+  // 已登录（本次会话）直接进入；否则显示登录
+  if (sessionStorage.getItem(LS_AUTH) === '1') {
+    showApp();
+  } else {
+    $('loginOverlay').classList.remove('hidden');
+    $('appBody').style.display = 'none';
+  }
+}
+
+$('loginBtn').addEventListener('click', doLogin);
+$('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginPass').focus(); });
+$('loginUser').addEventListener('input', () => $('loginErr').classList.remove('show'));
+$('loginPass').addEventListener('input', () => $('loginErr').classList.remove('show'));
+
 const API = 'https://api.github.com';
 const OWNER_REPO = 'jingju5201314-create/imgbed-blog-config';
 const BRANCH = 'main';
 const LS_TOKEN = 'album_tool_token';
 const LS_ALBUM = 'album_tool_last_album';
-const $ = id => document.getElementById(id);
 
 // ---- 初始化：恢复记住的 token / 相册，加载已有相册列表 ----
-(function init() {
+function initApp() {
   const savedToken = localStorage.getItem(LS_TOKEN);
   if (savedToken) { $('token').value = savedToken; $('rememberToken').checked = true; }
   const savedAlbum = localStorage.getItem(LS_ALBUM);
   if (savedAlbum) $('albumId').value = savedAlbum;
   $('links').addEventListener('input', refreshPreview);
   loadAlbums();
-})();
+}
+
+// 页面加载：先验证登录
+guardInit();
 
 async function loadAlbums() {
   const token = $('token').value.trim();
