@@ -15,6 +15,7 @@
     --muted: #8a8fa3;
     --border: #e2e4ee;
     --success: #22a06b;
+    --warn: #b7791f;
     --danger: #d64545;
     --radius: 12px;
   }
@@ -23,10 +24,10 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg);
     color: var(--text);
-    padding: 28px 16px;
+    padding: 28px 16px 60px;
     line-height: 1.6;
   }
-  .container { max-width: 680px; margin: 0 auto; }
+  .container { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 22px; margin-bottom: 4px; }
   .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
   .card {
@@ -37,10 +38,20 @@
     box-shadow: 0 2px 12px rgba(45, 49, 66, 0.06);
     border: 1px solid var(--border);
   }
+  .card > .card-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 700; margin: -4px 0 12px;
+  }
+  .card > .card-head .step {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--primary); color: #fff; font-size: 12px; font-weight: 700;
+    flex: none;
+  }
   label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 6px; }
   .row { display: flex; gap: 12px; }
   .row > div { flex: 1; }
-  input[type="text"], input[type="password"], textarea {
+  input[type="text"], input[type="password"], textarea, select {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--border);
@@ -49,10 +60,12 @@
     font-family: inherit;
     background: #fafbfd;
     transition: border-color .2s;
+    color: var(--text);
   }
-  input:focus, textarea:focus { outline: none; border-color: var(--primary); background: #fff; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary); background: #fff; }
   textarea { resize: vertical; min-height: 100px; font-family: ui-monospace, Consolas, monospace; font-size: 14px; }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .hint code { font-size: 11px; }
   .remember-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
   .remember-row input { width: auto; }
   .btn {
@@ -65,16 +78,27 @@
     cursor: pointer;
     transition: all .2s;
     min-height: 44px;
+    font-family: inherit;
   }
   .btn-primary { background: var(--primary); color: #fff; width: 100%; }
   .btn-primary:hover { background: var(--primary-dark); }
-  .btn-primary:disabled { background: #a8b3e8; cursor: not-allowed; }
-  #status { display: none; margin-top: 14px; padding: 12px 14px; border-radius: 8px; font-size: 14px; word-break: break-all; }
-  #status.ok { display: block; background: #e8f7f0; color: var(--success); border: 1px solid #b8e6d2; }
-  #status.err { display: block; background: #fdeaea; color: var(--danger); border: 1px solid #f3c2c2; }
-  #status.info { display: block; background: #eef1ff; color: var(--primary-dark); border: 1px solid #cdd6f7; }
-  #preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 12px; }
-  .pitem { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); aspect-ratio: 1; }
+  .btn-primary:disabled, .btn:disabled { background: #a8b3e8; cursor: not-allowed; }
+  .btn-ghost { background: #eef0f7; color: var(--text); }
+  .btn-ghost:hover { background: #e2e5f0; }
+  .btn-ghost:disabled { background: #f0f1f6; color: var(--muted); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #b53a3a; }
+  .btn-danger:disabled { background: #e8a3a3; }
+  .btn-sm { min-height: 36px; padding: 8px 14px; font-size: 13px; }
+  .status { display: none; margin-top: 14px; padding: 12px 14px; border-radius: 8px; font-size: 14px; word-break: break-word; }
+  .status.show { display: block; }
+  .status.ok { background: #e8f7f0; color: var(--success); border: 1px solid #b8e6d2; }
+  .status.err { background: #fdeaea; color: var(--danger); border: 1px solid #f3c2c2; }
+  .status.info { background: #eef1ff; color: var(--primary-dark); border: 1px solid #cdd6f7; }
+  .status.warn { background: #fdf6e3; color: var(--warn); border: 1px solid #f0dfae; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 12px; }
+  .grid:empty { display: none; }
+  .pitem { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); aspect-ratio: 1; background: #f0f1f6; }
   .pitem img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .pitem .pdel {
     position: absolute; top: 4px; right: 4px; width: 24px; height: 24px;
@@ -89,34 +113,40 @@
     background: var(--danger); color: #fff; font-size: 11px; text-align: center; padding: 2px 0;
     z-index: 2;
   }
+  .pitem .pbadge {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    font-size: 11px; text-align: center; padding: 2px 0; color: #fff; z-index: 1;
+  }
+  .pitem .pbadge.uploading { background: rgba(79,110,247,.9); }
+  .pitem .pbadge.error { background: rgba(214,69,69,.9); }
+  .pitem .pbadge.ready { display: none; }
+  .dropzone {
+    margin-top: 10px; border: 2px dashed var(--border); border-radius: 10px;
+    padding: 22px 16px; text-align: center; color: var(--muted); font-size: 14px;
+    background: #fafbfd; cursor: pointer; transition: all .18s;
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: var(--primary); background: #eef1ff; color: var(--primary-dark); }
+  .dropzone strong { color: var(--primary); }
   .manage-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
   .manage-bar .btn { min-height: 40px; }
   #manageCount { font-size: 13px; color: var(--muted); }
-  .btn-ghost { background: #eef0f7; color: var(--text); }
-  .btn-ghost:hover { background: #e2e5f0; }
-  .btn-danger { background: var(--danger); color: #fff; }
-  .btn-danger:hover { background: #b53a3a; }
-  .btn-danger:disabled { background: #e8a3a3; cursor: not-allowed; }
-  details { margin-top: 14px; }
-  summary { cursor: pointer; font-size: 13px; color: var(--muted); user-select: none; padding: 4px 0; }
-  details .adv-body { margin-top: 6px; }
-  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .chip {
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    font-size: 13px;
-    cursor: pointer;
-    background: #fafbfd;
-    transition: all .15s;
-    color: var(--text);
+    padding: 6px 14px; border: 1px solid var(--border); border-radius: 20px;
+    font-size: 13px; cursor: pointer; background: #fafbfd; transition: all .15s; color: var(--text);
   }
   .chip:hover { border-color: var(--primary); color: var(--primary); }
   .chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
-  code { background: #f0f1f6; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-  @media (max-width: 640px) {
-    input, textarea { font-size: 16px; }
+  .pill {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; margin-left: 6px; vertical-align: middle;
   }
+  .pill.new { background: #eef1ff; color: var(--primary-dark); }
+  .pill.exists { background: #e8f7f0; color: var(--success); }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--muted); user-select: none; padding: 4px 0; }
+  details .adv-body { margin-top: 6px; }
+  code { background: #f0f1f6; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
   /* ---- 登录界面 ---- */
   #loginOverlay {
     position: fixed; inset: 0; z-index: 999;
@@ -126,12 +156,9 @@
   }
   #loginOverlay.hidden { display: none; }
   .login-card {
-    background: var(--card);
-    border-radius: var(--radius);
-    padding: 32px 28px;
+    background: var(--card); border-radius: var(--radius); padding: 32px 28px;
     width: 100%; max-width: 380px;
-    box-shadow: 0 2px 16px rgba(45, 49, 66, 0.1);
-    border: 1px solid var(--border);
+    box-shadow: 0 2px 16px rgba(45, 49, 66, 0.1); border: 1px solid var(--border);
   }
   .login-card h2 { font-size: 20px; margin-bottom: 4px; }
   .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
@@ -139,6 +166,10 @@
   .login-err.show { display: block; }
   #loginBtn { width: 100%; margin-top: 8px; }
   #appBody { display: none; }
+  @media (max-width: 640px) {
+    input, textarea, select { font-size: 16px; }
+    .row { flex-direction: column; gap: 0; }
+  }
 </style>
 </head>
 <body>
@@ -158,117 +189,183 @@
 
 <div class="container" id="appBody">
   <h1>相册图片添加工具</h1>
-  <div class="subtitle">粘贴图片链接 → 写入博客相册。提交后到博客页面 3 秒内连点左上角 logo 3 次刷新缓存即可显示</div>
+  <div class="subtitle">拖入图片上传到图床 → 写入博客相册。提交后到博客页面 3 秒内连点左上角 logo 3 次刷新缓存即可显示</div>
 
+  <!-- ① 令牌 -->
   <div class="card">
-    <label for="token">GitHub Token</label>
-    <input type="password" id="token" placeholder="ghp_..." autocomplete="off">
+    <div class="card-head"><span class="step">1</span>令牌设置</div>
+
+    <label for="token">GitHub Token<span class="hint" style="display:inline;margin-left:6px">用于读写博客配置仓库</span></label>
+    <input type="password" id="token" placeholder="ghp_... 或 github_pat_..." autocomplete="off">
     <div class="remember-row">
       <input type="checkbox" id="rememberToken" checked>
       <label for="rememberToken" style="margin:0;font-weight:400">记住 token（仅保存在这台电脑的浏览器里）</label>
     </div>
+
+    <label for="imgbedToken" style="margin-top:16px">图床上传令牌<span class="hint" style="display:inline;margin-left:6px">在 ImgBed 后台「API Token 管理」生成</span></label>
+    <input type="password" id="imgbedToken" placeholder="粘贴 API Token（不需要填 Bearer）" autocomplete="off">
+    <div class="remember-row">
+      <input type="checkbox" id="rememberImgbedToken" checked>
+      <label for="rememberImgbedToken" style="margin:0;font-weight:400">记住图床令牌</label>
+    </div>
+
+    <details>
+      <summary>高级选项（图床地址 / 上传渠道）</summary>
+      <div class="adv-body">
+        <label for="imgbedBase">图床地址</label>
+        <input type="text" id="imgbedBase" placeholder="https://ling520.ccwu.cc">
+        <label for="uploadChannel">上传渠道</label>
+        <select id="uploadChannel">
+          <option value="">自动（交给图床决定）</option>
+          <option value="github">github（GitHub Releases）</option>
+          <option value="googledrive">googledrive（Google Drive）</option>
+        </select>
+        <div class="hint">本图床当前启用的渠道：github、googledrive</div>
+      </div>
+    </details>
   </div>
 
+  <!-- ② 选图 -->
   <div class="card">
-    <label for="albumId">相册</label>
-    <input type="text" id="albumId" placeholder="选择已有相册，或输入新相册名（英文）" list="albumList">
+    <div class="card-head"><span class="step">2</span>选择图片</div>
+
+    <div class="dropzone" id="dropzone">
+      把图片拖到这里，或 <strong>点击选择文件</strong><br>
+      <span style="font-size:12px">也可以直接 Ctrl+V 粘贴剪贴板里的图片</span>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    </div>
+
+    <div class="manage-bar">
+      <button class="btn btn-ghost btn-sm" id="uploadFilesBtn" type="button" disabled>上传到图床</button>
+      <span id="uploadCount" class="hint" style="margin:0"></span>
+    </div>
+    <div class="status" id="uploadStatus"></div>
+
+    <label for="links" style="margin-top:16px">或者粘贴图片链接（每行一个，可批量）</label>
+    <textarea id="links" placeholder="https://example.com/1.webp&#10;https://example.com/2.webp" style="min-height:80px"></textarea>
+    <div class="manage-bar">
+      <button class="btn btn-ghost btn-sm" id="addLinksBtn" type="button">加入下面的列表</button>
+    </div>
+
+    <label style="margin-top:16px">待写入的图片 <span id="pendingCount" class="hint" style="margin:0;font-weight:400"></span></label>
+    <div class="grid" id="pendingGrid"></div>
+    <div class="hint" id="pendingEmpty">还没有图片。拖入文件或粘贴链接后，会显示在这里。</div>
+  </div>
+
+  <!-- ③ 相册 -->
+  <div class="card">
+    <div class="card-head"><span class="step">3</span>目标相册</div>
+
+    <label for="albumId">相册名（英文，仅字母数字短横线下划线）</label>
+    <input type="text" id="albumId" placeholder="选择已有相册，或输入新相册名" list="albumList">
     <datalist id="albumList"></datalist>
-    <div class="chip-row" id="albumChips"></div>
-    <div class="hint">输入已有相册名会追加图片；新名字会自动创建相册。也可以点上面的标签快速选择</div>
+    <div class="chips" id="albumChips"></div>
+    <div class="manage-bar">
+      <button class="btn btn-ghost btn-sm" id="loadAlbumBtn" type="button">加载该相册</button>
+      <span id="albumState"></span>
+    </div>
+
+    <label for="albumTitle" style="margin-top:14px">相册标题（页面上显示的名字，可填中文）</label>
+    <input type="text" id="albumTitle" placeholder="留空则用相册名">
+
+    <label for="albumCover">封面图 URL</label>
+    <input type="text" id="albumCover" placeholder="留空则用第一张图">
+
+    <label for="albumDesc">相册描述</label>
+    <input type="text" id="albumDesc" placeholder="可选">
+
+    <div class="row">
+      <div>
+        <label for="albumDate">日期</label>
+        <input type="text" id="albumDate" placeholder="YYYY-MM-DD">
+      </div>
+      <div>
+        <label for="albumLocation">地点</label>
+        <input type="text" id="albumLocation" placeholder="可选">
+      </div>
+    </div>
+
+    <label for="albumTags">标签（逗号分隔）</label>
+    <input type="text" id="albumTags" placeholder="旅行, 风景">
+
+    <div style="margin-top:16px">
+      <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
+    </div>
+    <div class="status" id="saveStatus"></div>
   </div>
 
+  <!-- ④ 管理 -->
   <div class="card">
-    <label>管理相册图片（删除）</label>
+    <div class="card-head"><span class="step">4</span>管理已有图片</div>
     <div class="manage-bar">
       <button class="btn btn-ghost" id="loadManageBtn" type="button">加载相册图片</button>
       <span id="manageCount"></span>
     </div>
-    <div id="manageGrid"></div>
+    <div class="grid" id="manageGrid"></div>
     <div class="manage-bar">
       <button class="btn btn-danger" id="deleteMarkedBtn" type="button" disabled>删除已标记的图片</button>
     </div>
-    <div id="manageStatus" style="margin-top:10px"></div>
-    <div class="hint">点图片右上角的 ✕ 标记要删除的图（可多选），再点"删除已标记的图片"保存。删除前会弹窗确认</div>
+    <div class="status" id="manageStatus"></div>
+    <div class="hint">点图片右上角的 ✕ 标记要删除的图（可多选），再点「删除已标记的图片」保存。删除前会弹窗确认</div>
+
+    <details>
+      <summary>危险操作：删除整个相册</summary>
+      <div class="adv-body">
+        <button class="btn btn-danger btn-sm" id="deleteAlbumBtn" type="button">删除整个相册文件夹</button>
+        <div class="status" id="deleteAlbumStatus"></div>
+        <div class="hint">删除 <code>albums/&lt;相册名&gt;/</code> 下的全部文件（相册和所有图片都会从博客消失）。此操作不可恢复，需输入相册名二次确认</div>
+      </div>
+    </details>
   </div>
 
+  <!-- ⑤ 日记 -->
   <div class="card">
-    <label>删除整个相册</label>
-    <div class="manage-bar">
-      <button class="btn btn-danger" id="deleteAlbumBtn" type="button">删除整个相册文件夹</button>
-    </div>
-    <div id="deleteAlbumStatus" style="margin-top:10px"></div>
-    <div class="hint">删除 <code>albums/&lt;相册名&gt;/</code> 下的全部文件（相册和所有图片都会从博客消失）。此操作不可恢复，需输入相册名二次确认</div>
-  </div>
-
-  <div class="card">
-    <label>上传日记</label>
+    <div class="card-head"><span class="step">5</span>上传日记</div>
     <div class="row">
-      <div style="flex:1">
-        <label for="diaryDate" style="margin-top:0">日期（格式：2026-09-15）</label>
+      <div>
+        <label for="diaryDate">日期（格式：2026-09-15）</label>
         <input type="text" id="diaryDate" placeholder="2026-09-15">
       </div>
-      <div style="flex:1">
-        <label for="diaryTime" style="margin-top:0">时间（可选，24小时制）</label>
+      <div>
+        <label for="diaryTime">时间（可选，24小时制）</label>
         <input type="text" id="diaryTime" placeholder="20:30">
       </div>
     </div>
     <label for="diaryMood">心情（可选）</label>
     <input type="text" id="diaryMood" placeholder="例如：晚风、开心、平静">
     <div class="row">
-      <div style="flex:1">
+      <div>
         <label for="diaryLocation">地点（可选）</label>
         <input type="text" id="diaryLocation" placeholder="例如：城市天台">
       </div>
-      <div style="flex:1">
+      <div>
         <label for="diaryTags">标签（逗号分隔，可选）</label>
         <input type="text" id="diaryTags" placeholder="日常, 夜景">
       </div>
     </div>
     <label for="diaryImages">图片链接（每行一个，可选）</label>
-    <textarea id="diaryImages" placeholder="https://example.com/1.webp"></textarea>
-    <div id="diaryPreview"></div>
+    <textarea id="diaryImages" placeholder="https://example.com/1.webp" style="min-height:70px"></textarea>
+    <div class="grid" id="diaryPreview"></div>
     <label for="diaryContent">日记正文（支持 Markdown，每段空一行）</label>
     <textarea id="diaryContent" style="min-height:140px" placeholder="今天发生的事情……"></textarea>
     <div style="margin-top:12px">
       <button class="btn btn-primary" id="submitDiaryBtn">上传日记</button>
     </div>
-    <div id="diaryStatus" style="margin-top:10px"></div>
-    <div class="hint">日记会保存到 <code>diary/&lt;日期&gt;-&lt;序号&gt;/</code>，正文和图片可同时提交。上传后需刷新博客缓存生效</div>
-  </div>
-
-  <div class="card">
-    <label for="links">图片链接（每行一个，可批量粘贴）</label>
-    <textarea id="links" placeholder="https://example.com/1.webp&#10;https://example.com/2.webp"></textarea>
-    <div id="preview"></div>
-  </div>
-
-  <div class="card">
-    <details>
-      <summary>高级选项（新建相册时可用：标题 / 封面 / 描述 / 标签）</summary>
-      <div class="adv-body">
-        <label for="albumTitle">相册标题（页面上显示的名字，可填中文）</label>
-        <input type="text" id="albumTitle" placeholder="例如：我的照片（留空则用相册名）">
-        <label for="albumCover">封面图 URL</label>
-        <input type="text" id="albumCover" placeholder="留空则用第一张图">
-        <label for="albumDesc">相册描述</label>
-        <input type="text" id="albumDesc" placeholder="可选">
-        <label for="albumTags">标签（逗号分隔）</label>
-        <input type="text" id="albumTags" placeholder="旅行, 风景">
-      </div>
-    </details>
-  </div>
-
-  <div class="card">
-    <button class="btn btn-primary" id="submitBtn">写入相册</button>
-    <div id="status"></div>
+    <div class="status" id="diaryStatus"></div>
+    <div class="hint">日记会保存到 <code>diary/&lt;日期&gt;-&lt;序号&gt;/</code>，正文和图片<strong>一次提交</strong>完成。上传后需刷新博客缓存生效</div>
   </div>
 </div>
 
 <script>
+/* =========================================================================
+   相册图片添加工具
+   - 图片：拖拽 / 选择文件 / 粘贴 → 上传到 ImgBed → 写入博客相册
+   - 写入：全部走 Git Data API，一次操作 = 一个 commit
+   ========================================================================= */
+
 const $ = id => document.getElementById(id);
 
-// ---- 登录验证 ----
-// 账号/密码的 SHA-256 哈希（jingju520 / jingju520），不存明文
+/* ---------- 登录验证（保持原逻辑不变） ---------- */
 const AUTH_HASH = '2e291d7261f72b8e2c5264f915647f41adb15e2d9b1480d146f3231833b377f6';
 const LS_AUTH = 'album_tool_auth';
 
@@ -305,10 +402,8 @@ function showApp() {
 }
 
 function guardInit() {
-  // 已登录（本次会话）直接进入；否则显示登录
-  if (sessionStorage.getItem(LS_AUTH) === '1') {
-    showApp();
-  } else {
+  if (sessionStorage.getItem(LS_AUTH) === '1') showApp();
+  else {
     $('loginOverlay').classList.remove('hidden');
     $('appBody').style.display = 'none';
   }
@@ -320,143 +415,600 @@ $('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') $('logi
 $('loginUser').addEventListener('input', () => $('loginErr').classList.remove('show'));
 $('loginPass').addEventListener('input', () => $('loginErr').classList.remove('show'));
 
+/* ---------- 常量 ---------- */
 const API = 'https://api.github.com';
 const OWNER_REPO = 'jingju5201314-create/imgbed-blog-config';
 const BRANCH = 'main';
-const LS_TOKEN = 'album_tool_token';
-const LS_ALBUM = 'album_tool_last_album';
+const DEFAULT_IMGBED = 'https://ling520.ccwu.cc';
+const LS = {
+  token: 'album_tool_token',
+  imgbedToken: 'album_tool_imgbed_token',
+  imgbedBase: 'album_tool_imgbed_base',
+  channel: 'album_tool_channel',
+  album: 'album_tool_last_album'
+};
 
-// ---- 初始化：恢复记住的 token / 相册，加载已有相册列表 ----
-function initApp() {
-  const savedToken = localStorage.getItem(LS_TOKEN);
-  if (savedToken) { $('token').value = savedToken; $('rememberToken').checked = true; }
-  const savedAlbum = localStorage.getItem(LS_ALBUM);
-  if (savedAlbum) $('albumId').value = savedAlbum;
-  $('links').addEventListener('input', refreshPreview);
-  loadAlbums();
+/* ---------- 通用工具 ---------- */
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s == null ? '' : s);
+  return d.innerHTML;
 }
 
-// 页面加载：先验证登录
-guardInit();
+// UTF-8 字符串 → base64（替代废弃的 unescape hack）
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+// base64 → UTF-8 字符串（原版直接用 atob，中文会变乱码）
+function base64ToUtf8(b64) {
+  const bin = atob(String(b64).replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// 与仓库现有风格一致：tab 缩进 + 去掉行尾空格 + 末尾换行
+function stringifyJson(obj) {
+  return JSON.stringify(obj, null, '\t').split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n') + '\n';
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function parseTags(s) {
+  return String(s || '').split(/[,，]/).map(x => x.trim()).filter(Boolean);
+}
+
+// 校验并规范化图片链接
+function normalizeLink(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) return null;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.toString();
+  } catch (e) {
+    return null;
+  }
+}
+
+function setStatus(el, msg, type) {
+  const node = typeof el === 'string' ? $(el) : el;
+  node.className = 'status show ' + (type || 'info');
+  node.innerHTML = msg;
+}
+function clearStatus(el) {
+  const node = typeof el === 'string' ? $(el) : el;
+  node.className = 'status';
+  node.innerHTML = '';
+}
+
+function shortSha(sha) { return String(sha || '').slice(0, 7); }
+function refreshTip(sha) {
+  return '<br>提交 <code>' + shortSha(sha) + '</code> · 回到博客 3 秒内连点左上角 logo 3 次刷新缓存生效';
+}
+
+/* ---------- GitHub API ---------- */
+function ghError(message, status) {
+  const e = new Error(message);
+  e.status = status || 0;
+  return e;
+}
+
+async function gh(path, method = 'GET', body = null) {
+  const token = $('token').value.trim();
+  if (!token) throw ghError('请先填写 GitHub Token', 0);
+  if (method === 'GET') {
+    path += (path.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+  }
+  const headers = {
+    Authorization: 'token ' + token,
+    'User-Agent': 'album-tool',
+    Accept: 'application/vnd.github+json'
+  };
+  const opts = { method, headers, cache: 'no-store' };
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  let res;
+  try {
+    res = await fetch(API + path, opts);
+  } catch (e) {
+    throw ghError('网络请求失败（可能是浏览器插件或网络拦截）：' + e.message, 0);
+  }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { /* 非 JSON */ }
+
+  if (!res.ok) {
+    const detail = data && data.message ? data.message : (text || '').slice(0, 160);
+    if (res.status === 401) throw ghError('GitHub Token 无效或已过期（401）', 401);
+    if (res.status === 403) throw ghError('权限不足或触发速率限制（403）：' + detail, 403);
+    if (res.status === 404) throw ghError('找不到仓库/分支/文件（404）——请确认 Token 对私有仓库 ' + OWNER_REPO + ' 有 Contents 读写权限', 404);
+    if (res.status === 409) throw ghError('提交冲突（409），通常是有另一次提交刚发生，重试一次即可：' + detail, 409);
+    if (res.status === 422) throw ghError('请求被拒绝（422）：' + detail, 422);
+    throw ghError('HTTP ' + res.status + '：' + detail, res.status);
+  }
+  return data;
+}
+
+/* ---------- 单 commit 写入 ----------
+   upserts:   [{ path, content, encoding? }]  content 为 UTF-8 字符串
+   deletions: [path]
+   无论多少个文件，只产生 1 个 commit。                                    */
+async function commitChanges({ message, upserts = [], deletions = [] }) {
+  if (!upserts.length && !deletions.length) return null;
+
+  const ref = await gh('/repos/' + OWNER_REPO + '/git/ref/heads/' + BRANCH);
+  const parentSha = ref.object.sha;
+  const parent = await gh('/repos/' + OWNER_REPO + '/git/commits/' + parentSha);
+
+  const tree = [];
+  for (const f of upserts) {
+    const blob = await gh('/repos/' + OWNER_REPO + '/git/blobs', 'POST', {
+      content: f.content,
+      encoding: f.encoding || 'utf-8'
+    });
+    tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
+  }
+  for (const p of deletions) {
+    tree.push({ path: p, mode: '100644', type: 'blob', sha: null });
+  }
+
+  const newTree = await gh('/repos/' + OWNER_REPO + '/git/trees', 'POST', {
+    base_tree: parent.tree.sha,
+    tree
+  });
+  const commit = await gh('/repos/' + OWNER_REPO + '/git/commits', 'POST', {
+    message,
+    tree: newTree.sha,
+    parents: [parentSha]
+  });
+  await gh('/repos/' + OWNER_REPO + '/git/refs/heads/' + BRANCH, 'PATCH', { sha: commit.sha });
+  return commit;
+}
+
+/* ---------- 相册读写 ---------- */
+let albumCache = null; // { ids: [...] }
+
+async function listAlbumIds(force) {
+  if (albumCache && !force) return albumCache.ids;
+  const items = await gh('/repos/' + OWNER_REPO + '/contents/albums?ref=' + BRANCH);
+  const ids = (Array.isArray(items) ? items : []).filter(i => i.type === 'dir').map(i => i.name);
+  albumCache = { ids };
+  return ids;
+}
+
+async function fetchAlbum(albumId) {
+  try {
+    const data = await gh('/repos/' + OWNER_REPO + '/contents/albums/' + encodeURIComponent(albumId) + '/info.json?ref=' + BRANCH);
+    return { json: JSON.parse(base64ToUtf8(data.content)), sha: data.sha };
+  } catch (e) {
+    if (e.status === 404) return null;
+    throw e;
+  }
+}
+
+// 解析已有 photo id 的数字后缀，取 max+1，避免删图后编号撞车
+function nextPhotoIds(existing, albumId, count) {
+  const used = new Set();
+  let max = 0;
+  (existing || []).forEach(p => {
+    const id = String(p && p.id || '');
+    used.add(id);
+    const m = /-photo-(\d+)$/.exec(id);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  const out = [];
+  while (out.length < count) {
+    max += 1;
+    const id = albumId + '-photo-' + max;
+    if (!used.has(id)) { used.add(id); out.push(id); }
+  }
+  return out;
+}
+
+/* ---------- 日记 ---------- */
+// 目录名本身就是 <日期>-<id>，直接解析即可，无需逐个读取 info.json
+async function nextDiaryId() {
+  const items = await gh('/repos/' + OWNER_REPO + '/contents/diary?ref=' + BRANCH);
+  let max = 0;
+  (Array.isArray(items) ? items : []).forEach(it => {
+    if (it.type !== 'dir') return;
+    const m = /-(\d+)$/.exec(it.name);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return max + 1;
+}
+
+/* ---------- ImgBed 上传 ---------- */
+function imgbedBase() {
+  return ($('imgbedBase').value.trim() || DEFAULT_IMGBED).replace(/\/+$/, '');
+}
+
+function pickUploadedSrc(data) {
+  if (Array.isArray(data) && data[0] && typeof data[0].src === 'string') return data[0].src;
+  if (data && Array.isArray(data.data) && data.data[0] && typeof data.data[0].src === 'string') return data.data[0].src;
+  if (data && typeof data.src === 'string') return data.src;
+  return '';
+}
+
+function normalizeImgbedUrl(src, base) {
+  let s = String(src || '').trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith('/')) return base + s;
+  return base + '/file/' + s.replace(/^file\//, '');
+}
+
+async function imgbedUpload(file) {
+  const token = $('imgbedToken').value.trim();
+  if (!token) throw new Error('请先填写图床上传令牌（ImgBed 后台 → API Token 管理）');
+
+  const base = imgbedBase();
+  const channel = $('uploadChannel').value;
+  const qs = new URLSearchParams();
+  if (channel) qs.set('uploadChannel', channel);
+
+  const fd = new FormData();
+  fd.append('file', file, file.name || 'image.png');
+
+  const headers = {};
+  if (token) headers['Authorization'] = token;
+
+  let res;
+  try {
+    res = await fetch(base + '/upload' + (qs.toString() ? '?' + qs.toString() : ''), {
+      method: 'POST',
+      headers,
+      body: fd
+    });
+  } catch (e) {
+    throw new Error('连接图床失败：' + e.message + '（检查图床地址 / 网络 / 广告拦截插件）');
+  }
+
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { /* 非 JSON */ }
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error('图床令牌无效或已过期（401）——请到 ImgBed 后台「API Token 管理」重新生成');
+    }
+    const detail = data && (data.error || data.message) ? (data.error || data.message) : (text || '').slice(0, 160);
+    throw new Error('图床上传失败（HTTP ' + res.status + '）：' + detail);
+  }
+
+  const url = normalizeImgbedUrl(pickUploadedSrc(data), base);
+  if (!url) throw new Error('图床返回成功但没解析出图片地址：' + JSON.stringify(data).slice(0, 200));
+  return url;
+}
+
+/* ---------- 待写入图片列表 ---------- */
+let items = []; // { key, url?, file?, blobUrl?, status:'ready'|'idle'|'uploading'|'error', error? }
+let itemSeq = 0;
+
+function itemsReady() { return items.filter(i => i.status === 'ready' && i.url); }
+
+function addUrls(urls) {
+  let added = 0, dup = 0, bad = 0;
+  urls.forEach(raw => {
+    const u = normalizeLink(raw);
+    if (!u) { bad++; return; }
+    if (items.some(i => i.url === u)) { dup++; return; }
+    items.push({ key: 'i' + (++itemSeq), url: u, status: 'ready' });
+    added++;
+  });
+  return { added, dup, bad };
+}
+
+function addFiles(files) {
+  let added = 0;
+  Array.from(files || []).forEach(f => {
+    if (!f || !/^image\//i.test(f.type)) return;
+    items.push({
+      key: 'f' + (++itemSeq),
+      file: f,
+      blobUrl: URL.createObjectURL(f),
+      status: 'idle'
+    });
+    added++;
+  });
+  return added;
+}
+
+function renderPending() {
+  const grid = $('pendingGrid');
+  grid.innerHTML = '';
+  items.forEach(it => {
+    const wrap = document.createElement('div');
+    wrap.className = 'pitem';
+
+    const img = document.createElement('img');
+    img.src = it.url || it.blobUrl;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.onerror = () => { img.style.opacity = '.25'; };
+    wrap.appendChild(img);
+
+    const del = document.createElement('button');
+    del.className = 'pdel';
+    del.textContent = '✕';
+    del.title = '移除';
+    del.onclick = () => {
+      if (it.blobUrl) URL.revokeObjectURL(it.blobUrl);
+      items = items.filter(x => x.key !== it.key);
+      renderPending();
+    };
+    wrap.appendChild(del);
+
+    if (it.status !== 'ready') {
+      const badge = document.createElement('div');
+      badge.className = 'pbadge ' + it.status;
+      badge.textContent = it.status === 'uploading' ? '上传中…' : (it.status === 'error' ? '失败' : '待上传');
+      if (it.status === 'error' && it.error) badge.title = it.error;
+      wrap.appendChild(badge);
+    }
+
+    grid.appendChild(wrap);
+  });
+
+  const ready = itemsReady().length;
+  const idle = items.filter(i => i.status === 'idle' || i.status === 'error').length;
+  $('pendingCount').textContent = items.length ? '（' + items.length + ' 张，其中 ' + ready + ' 张已就绪）' : '';
+  $('pendingEmpty').style.display = items.length ? 'none' : 'block';
+  $('uploadFilesBtn').disabled = idle === 0;
+  $('uploadCount').textContent = idle ? idle + ' 张待上传' : (items.length ? '全部已就绪' : '');
+}
+
+/* 并发上传（限制 2 个） */
+let uploading = false;
+async function uploadPendingFiles() {
+  if (uploading) return;
+  const todo = items.filter(i => i.status === 'idle' || i.status === 'error');
+  if (!todo.length) return;
+
+  uploading = true;
+  $('uploadFilesBtn').disabled = true;
+  clearStatus('uploadStatus');
+
+  let ok = 0, fail = 0;
+  const queue = todo.slice();
+
+  async function worker() {
+    while (queue.length) {
+      const it = queue.shift();
+      it.status = 'uploading';
+      it.error = '';
+      renderPending();
+      try {
+        const url = await imgbedUpload(it.file);
+        it.url = url;
+        it.status = 'ready';
+        ok++;
+      } catch (e) {
+        it.status = 'error';
+        it.error = e.message;
+        fail++;
+      }
+      renderPending();
+    }
+  }
+
+  setStatus('uploadStatus', '正在上传 ' + todo.length + ' 张图片…', 'info');
+  await Promise.all([worker(), worker()]);
+
+  uploading = false;
+  renderPending();
+  if (fail === 0) {
+    setStatus('uploadStatus', '✅ ' + ok + ' 张图片上传完成，已加入下方列表。', 'ok');
+  } else {
+    setStatus('uploadStatus', '⚠️ 成功 ' + ok + ' 张，失败 ' + fail + ' 张。把鼠标移到失败的图片上可以看到原因，修好后可以再点一次「上传到图床」重试。', 'warn');
+  }
+}
+
+/* ---------- 相册界面 ---------- */
+function markActiveAlbum(id) {
+  document.querySelectorAll('#albumChips .chip').forEach(c => c.classList.toggle('active', c.textContent === id));
+}
+
+function fillAlbumForm(album, albumId) {
+  $('albumTitle').value = album.title || '';
+  $('albumCover').value = album.cover || '';
+  $('albumDesc').value = album.description || '';
+  $('albumDate').value = (album.date || todayStr()).slice(0, 10);
+  $('albumLocation').value = album.location || '';
+  $('albumTags').value = Array.isArray(album.tags) ? album.tags.join(', ') : '';
+}
+
+function clearAlbumForm() {
+  $('albumTitle').value = '';
+  $('albumCover').value = '';
+  $('albumDesc').value = '';
+  $('albumDate').value = todayStr();
+  $('albumLocation').value = '';
+  $('albumTags').value = '';
+}
 
 async function loadAlbums() {
   const token = $('token').value.trim();
   if (!token) return;
   try {
-    const albums = await gh(`/repos/${OWNER_REPO}/contents/albums?ref=${BRANCH}`);
-    const ids = albums.filter(i => i.type === 'dir').map(i => i.name);
-    // 更新 datalist
-    $('albumList').innerHTML = ids.map(id => `<option value="${esc(id)}"></option>`).join('');
-    // 更新标签 chips（最多显示 8 个）
-    const chipBox = $('albumChips');
-    chipBox.innerHTML = '';
+    const ids = await listAlbumIds(true);
+    $('albumList').innerHTML = ids.map(id => '<option value="' + esc(id) + '"></option>').join('');
+    const box = $('albumChips');
+    box.innerHTML = '';
     ids.slice(0, 8).forEach(id => {
       const c = document.createElement('button');
       c.type = 'button';
       c.className = 'chip';
       c.textContent = id;
-      c.onclick = () => { $('albumId').value = id; markActive(id); };
-      chipBox.appendChild(c);
+      c.onclick = () => { $('albumId').value = id; markActiveAlbum(id); loadAlbumIntoForm(); };
+      box.appendChild(c);
     });
-  } catch (e) { /* token 未填或网络问题，静默 */ }
-}
-
-function markActive(id) {
-  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.textContent === id));
-}
-
-function refreshPreview() {
-  const urls = getUrls();
-  $('preview').innerHTML = '';
-  urls.slice(0, 24).forEach(u => {
-    const item = document.createElement('div');
-    item.className = 'pitem';
-    const img = document.createElement('img');
-    img.src = u;
-    img.alt = '';
-    img.onerror = () => { img.style.opacity = '.25'; };
-    item.appendChild(img);
-    $('preview').appendChild(item);
-  });
-}
-
-function getUrls() {
-  return $('links').value.split('\n').map(s => s.trim()).filter(Boolean);
-}
-
-// ---- GitHub API ----
-function setStatus(msg, type) {
-  const el = $('status');
-  el.className = type;
-  el.innerHTML = msg;
-}
-async function gh(path, method = 'GET', body = null) {
-  const token = $('token').value.trim();
-  if (!token) throw new Error('请先填写 GitHub Token');
-  const headers = { Authorization: 'token ' + token, 'User-Agent': 'album-tool', Accept: 'application/vnd.github+json' };
-  if (method === 'GET') {
-    // 附加时间戳参数让 URL 每次不同，绕过 GitHub API 缓存；不能用自定义请求头（会触发 CORS 预检失败）
-    path = path + (path.includes('?') ? '&' : '?') + '_ts=' + Date.now();
-  }
-  const opts = { method, headers, cache: 'no-store' };
-  if (body) { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-  const res = await fetch(API + path, opts);
-  const text = await res.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch (e) {}
-  if (!res.ok) {
-    const msg = data && data.message ? data.message : ('HTTP ' + res.status);
-    throw new Error(msg);
-  }
-  return data;
-}
-async function getAlbumInfo(albumId) {
-  try {
-    const data = await gh(`/repos/${OWNER_REPO}/contents/albums/${albumId}/info.json?ref=${BRANCH}`);
-    return { data, json: JSON.parse(atob(data.content)) };
   } catch (e) {
-    return null;
+    // 让用户看到失败原因，而不是静默装作没有相册
+    $('albumState').innerHTML = '<span class="hint" style="color:var(--danger)">相册列表加载失败：' + esc(e.message) + '</span>';
   }
 }
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+
+async function loadAlbumIntoForm() {
+  const albumId = $('albumId').value.trim();
+  clearStatus('saveStatus');
+  if (!albumId) {
+    $('albumState').innerHTML = '';
+    return;
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) {
+    $('albumState').innerHTML = '<span class="pill" style="background:#fdeaea;color:var(--danger)">名字不合法</span>';
+    return;
+  }
+  $('albumState').innerHTML = '<span class="hint">读取中…</span>';
+  try {
+    const found = await fetchAlbum(albumId);
+    if (found) {
+      const n = (found.json.photos || []).length;
+      $('albumState').innerHTML = '<span class="pill exists">已存在</span> <span class="hint">' + n + ' 张图，可直接修改标题／封面／描述后保存</span>';
+      fillAlbumForm(found.json, albumId);
+    } else {
+      $('albumState').innerHTML = '<span class="pill new">新相册</span> <span class="hint">保存时会创建</span>';
+      clearAlbumForm();
+      if (!$('albumTitle').value) $('albumTitle').value = '';
+    }
+  } catch (e) {
+    $('albumState').innerHTML = '<span class="hint" style="color:var(--danger)">读取失败：' + esc(e.message) + '</span>';
+  }
 }
 
-// ---- 管理相册图片（删除）----
-let manageAlbum = null;      // 当前管理的相册 JSON
-let manageSha = null;        // 当前相册文件 sha
-let manageMarked = new Set(); // 标记删除的图片 id
+async function saveAlbum() {
+  const albumId = $('albumId').value.trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) {
+    setStatus('saveStatus', '相册名只能包含字母、数字、短横线、下划线', 'err');
+    return;
+  }
+
+  const newUrls = collectReadyUrls();
+  const idle = items.filter(i => i.status === 'idle' || i.status === 'error').length;
+
+  $('saveAlbumBtn').disabled = true;
+  setStatus('saveStatus', '正在写入…', 'info');
+  try {
+    const found = await fetchAlbum(albumId);
+    let album;
+    if (found) {
+      album = found.json;
+    } else {
+      album = {
+        id: albumId,
+        title: '',
+        description: '',
+        cover: '',
+        date: todayStr(),
+        location: '',
+        tags: [],
+        password: '',
+        photos: []
+      };
+    }
+
+    // 元信息：表单里是什么就写什么（允许清空）
+    album.id = albumId;
+    album.title = $('albumTitle').value.trim() || albumId;
+    album.description = $('albumDesc').value.trim();
+    album.cover = $('albumCover').value.trim();
+    album.date = $('albumDate').value.trim() || todayStr();
+    album.location = $('albumLocation').value.trim();
+    album.tags = parseTags($('albumTags').value);
+
+    // 追加图片（按已有最大编号续号）
+    const existing = Array.isArray(album.photos) ? album.photos : [];
+    const have = new Set(existing.map(p => p && p.src));
+    const fresh = newUrls.filter(u => !have.has(u));
+    if (fresh.length) {
+      const ids = nextPhotoIds(existing, albumId, fresh.length);
+      const base = existing.length;
+      fresh.forEach((u, i) => {
+        existing.push({ id: ids[i], src: u, alt: String(base + i + 1), title: String(base + i + 1), tags: [] });
+      });
+    }
+    album.photos = existing;
+
+    if (!album.cover && existing.length) album.cover = existing[0].src;
+
+    const content = stringifyJson(album);
+    const commit = await commitChanges({
+      message: 'album: update ' + albumId + (fresh.length ? ' (+' + fresh.length + ' photo)' : ''),
+      upserts: [{ path: 'albums/' + albumId + '/info.json', content }]
+    });
+
+    const skipped = newUrls.length - fresh.length;
+    setStatus('saveStatus',
+      '✅ 相册 <b>' + esc(albumId) + '</b> 已保存：本次新增 <b>' + fresh.length + '</b> 张，当前共 <b>' + existing.length + '</b> 张。' +
+      (skipped > 0 ? '<br>有 ' + skipped + ' 张链接已存在于该相册，已自动跳过。' : '') +
+      (idle > 0 ? '<br>⚠️ 还有 ' + idle + ' 张图片没上传成功，这次没有写进去。' : '') +
+      refreshTip(commit.sha), 'ok');
+
+    items = items.filter(i => i.status !== 'ready');
+    renderPending();
+    await listAlbumIds(true);
+    await loadAlbums();
+  } catch (e) {
+    setStatus('saveStatus', '❌ 保存失败：' + esc(e.message), 'err');
+  } finally {
+    $('saveAlbumBtn').disabled = false;
+  }
+}
+
+// 收集所有「已就绪」的图片链接
+function collectReadyUrls() {
+  return items.filter(i => i.status === 'ready' && i.url).map(i => i.url);
+}
+
+/* ---------- 管理已有图片 ---------- */
+let manageAlbum = null;
+let manageSha = null;
+let manageMarked = new Set();
 
 async function loadManage() {
-  const token = $('token').value.trim();
   const albumId = $('albumId').value.trim();
   const box = $('manageGrid');
   box.innerHTML = '';
   $('manageCount').textContent = '';
   $('deleteMarkedBtn').disabled = true;
-  $('manageStatus').innerHTML = '';
+  clearStatus('manageStatus');
   manageMarked = new Set();
-  if (!token) { $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请先填写 GitHub Token</div>'; return; }
-  if (!albumId) { $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请先在上方填写相册名</div>'; return; }
+  manageAlbum = null;
+
+  if (!$('token').value.trim()) { setStatus('manageStatus', '请先填写 GitHub Token', 'err'); return; }
+  if (!albumId) { setStatus('manageStatus', '请先在上方填写相册名', 'err'); return; }
 
   $('loadManageBtn').disabled = true;
   try {
-    const found = await getAlbumInfo(albumId);
+    const found = await fetchAlbum(albumId);
     if (!found) {
-      $('manageStatus').innerHTML = '<div class="hint">相册 <b>' + esc(albumId) + '</b> 不存在，无法管理</div>';
+      setStatus('manageStatus', '相册 <b>' + esc(albumId) + '</b> 不存在（或还没有 info.json）', 'warn');
       return;
     }
     manageAlbum = found.json;
-    manageSha = found.data.sha;
+    manageSha = found.sha;
     const photos = manageAlbum.photos || [];
     $('manageCount').textContent = '共 ' + photos.length + ' 张图片';
-    if (photos.length === 0) {
-      box.innerHTML = '<div class="hint">该相册暂无图片</div>';
+    if (!photos.length) {
+      setStatus('manageStatus', '该相册暂无图片', 'info');
       return;
     }
-    photos.forEach((p, i) => {
+    photos.forEach(p => {
       const item = document.createElement('div');
       item.className = 'pitem';
       item.dataset.pid = p.id;
@@ -471,21 +1023,19 @@ async function loadManage() {
       del.title = '标记删除';
       del.onclick = () => {
         const pid = item.dataset.pid;
-        if (manageMarked.has(pid)) {
-          manageMarked.delete(pid);
-          item.classList.remove('marked');
-        } else {
-          manageMarked.add(pid);
-          item.classList.add('marked');
-        }
+        if (manageMarked.has(pid)) { manageMarked.delete(pid); item.classList.remove('marked'); }
+        else { manageMarked.add(pid); item.classList.add('marked'); }
         $('deleteMarkedBtn').disabled = manageMarked.size === 0;
+        $('deleteMarkedBtn').textContent = manageMarked.size
+          ? '删除已标记的 ' + manageMarked.size + ' 张'
+          : '删除已标记的图片';
       };
       item.appendChild(img);
       item.appendChild(del);
       box.appendChild(item);
     });
   } catch (e) {
-    $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">加载失败：' + esc(e.message) + '</div>';
+    setStatus('manageStatus', '加载失败：' + esc(e.message), 'err');
   } finally {
     $('loadManageBtn').disabled = false;
   }
@@ -495,201 +1045,75 @@ async function deleteMarked() {
   if (!manageAlbum || manageMarked.size === 0) return;
   const albumId = $('albumId').value.trim();
   const markedIds = [...manageMarked];
-  const total = (manageAlbum.photos || []).length;
-  if (!confirm('确定从相册「' + albumId + '」删除 ' + markedIds.length + ' 张图片吗？\n此操作会提交到 GitHub 仓库，删除后需刷新缓存生效。')) return;
+  if (!confirm('确定从相册「' + albumId + '」删除 ' + markedIds.length + ' 张图片吗？\n删除后需刷新博客缓存生效。')) return;
 
   $('deleteMarkedBtn').disabled = true;
-  $('manageStatus').innerHTML = '<div class="hint">正在删除…</div>';
+  setStatus('manageStatus', '正在删除…', 'info');
   try {
     manageAlbum.photos = (manageAlbum.photos || []).filter(p => !markedIds.includes(p.id));
-    // 如果删掉了封面，封面换成第一张图
-    if (manageAlbum.cover && manageAlbum.photos.length > 0) {
-      const coverSrc = manageAlbum.photos[0].src;
-      const oldCover = manageAlbum.cover;
-      if (!manageAlbum.photos.some(p => p.src === oldCover)) {
-        manageAlbum.cover = coverSrc;
-      }
+    if (manageAlbum.photos.length === 0) {
+      manageAlbum.cover = '';
+    } else if (!manageAlbum.photos.some(p => p.src === manageAlbum.cover)) {
+      manageAlbum.cover = manageAlbum.photos[0].src;
     }
-    if (manageAlbum.photos.length === 0) manageAlbum.cover = '';
 
-    const raw = JSON.stringify(manageAlbum, null, '\t');
-    const newContent = raw.split('\n').map(l => l.replace(/\s+$/, '')).join('\n') + '\n';
-    const putBody = {
+    const commit = await commitChanges({
       message: 'album: delete ' + markedIds.length + ' photo(s) from ' + albumId,
-      content: btoa(unescape(encodeURIComponent(newContent))),
-      branch: BRANCH
-    };
-    if (manageSha) putBody.sha = manageSha;
-    const result = await gh(`/repos/${OWNER_REPO}/contents/albums/${albumId}/info.json`, 'PUT', putBody);
-    $('manageStatus').innerHTML = '<div class="hint" style="color:var(--success)">已删除 ' + markedIds.length + ' 张（剩余 ' + manageAlbum.photos.length + ' 张）。回到博客三连击 logo 刷新缓存生效</div>';
-    // 等待 1.2 秒让 GitHub 服务端完成同步，再强制绕过缓存刷新
-    await new Promise(r => setTimeout(r, 1200));
-    await loadManage(); // 重新加载
-    loadAlbums();
+      upserts: [{ path: 'albums/' + albumId + '/info.json', content: stringifyJson(manageAlbum) }]
+    });
+    setStatus('manageStatus', '✅ 已删除 ' + markedIds.length + ' 张，剩余 ' + manageAlbum.photos.length + ' 张。' + refreshTip(commit.sha), 'ok');
+    await loadManage();
+    await listAlbumIds(true);
+    await loadAlbums();
   } catch (e) {
-    $('manageStatus').innerHTML = '<div class="hint" style="color:var(--danger)">删除失败：' + esc(e.message) + '</div>';
+    setStatus('manageStatus', '删除失败：' + esc(e.message), 'err');
     $('deleteMarkedBtn').disabled = false;
   }
 }
 
-$('loadManageBtn').addEventListener('click', loadManage);
-$('deleteMarkedBtn').addEventListener('click', deleteMarked);
-
-// ---- 删除整个相册 ----
-async function listAlbumFiles(albumId) {
-  const path = `/repos/${OWNER_REPO}/contents/albums/${albumId}?ref=${BRANCH}`;
-  const items = await gh(path);
-  return items.filter(i => i.type === 'file').map(i => ({ path: i.path, sha: i.sha }));
-}
-
 async function deleteAlbum() {
-  const token = $('token').value.trim();
   const albumId = $('albumId').value.trim();
-  const box = $('deleteAlbumStatus');
-  if (!token) { box.innerHTML = '<div class="hint" style="color:var(--danger)">请先填写 GitHub Token</div>'; return; }
-  if (!albumId) { box.innerHTML = '<div class="hint" style="color:var(--danger)">请先在上方填写要删除的相册名</div>'; return; }
-  if (!/^[a-zA-Z0-9-_]+$/.test(albumId)) { box.innerHTML = '<div class="hint" style="color:var(--danger)">相册名只能包含字母、数字、短横线、下划线</div>'; return; }
+  if (!$('token').value.trim()) { setStatus('deleteAlbumStatus', '请先填写 GitHub Token', 'err'); return; }
+  if (!albumId) { setStatus('deleteAlbumStatus', '请先在上方填写要删除的相册名', 'err'); return; }
+  if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) { setStatus('deleteAlbumStatus', '相册名只能包含字母、数字、短横线、下划线', 'err'); return; }
 
   const typed = prompt('⚠️ 即将永久删除相册「' + albumId + '」（含全部图片）。\n此操作不可恢复！\n\n请输入相册名确认删除：');
-  if (typed === null) return; // 取消
-  if (typed.trim() !== albumId) {
-    box.innerHTML = '<div class="hint" style="color:var(--danger)">输入的名字与相册名不一致，已取消删除</div>';
-    return;
-  }
+  if (typed === null) return;
+  if (typed.trim() !== albumId) { setStatus('deleteAlbumStatus', '输入的名字与相册名不一致，已取消删除', 'err'); return; }
 
   $('deleteAlbumBtn').disabled = true;
-  box.innerHTML = '<div class="hint">正在删除…</div>';
+  setStatus('deleteAlbumStatus', '正在删除…', 'info');
   try {
-    const files = await listAlbumFiles(albumId);
-    if (files.length === 0) {
-      box.innerHTML = '<div class="hint">相册「' + esc(albumId) + '」不存在或已为空，无需删除</div>';
+    // 一次拿到目录下全部文件，然后一个 commit 全删掉（不再逐文件 DELETE）
+    const files = await gh('/repos/' + OWNER_REPO + '/contents/albums/' + encodeURIComponent(albumId) + '?ref=' + BRANCH);
+    const paths = (Array.isArray(files) ? files : []).filter(i => i.type === 'file').map(i => i.path);
+    if (!paths.length) {
+      setStatus('deleteAlbumStatus', '相册「' + esc(albumId) + '」不存在或已为空，无需删除', 'info');
       return;
     }
-    let deleted = 0;
-    for (const f of files) {
-      const body = { message: 'album: delete folder ' + albumId + ' (' + f.path.split('/').pop() + ')', sha: f.sha };
-      await gh(`/repos/${OWNER_REPO}/contents/${f.path}`, 'DELETE', body);
-      deleted++;
-    }
-    box.innerHTML = '<div class="hint" style="color:var(--success)">已删除相册「' + esc(albumId) + '」的 ' + deleted + ' 个文件。回到博客三连击 logo 刷新缓存生效</div>';
-    // 清理 UI
+    const commit = await commitChanges({
+      message: 'album: delete folder ' + albumId + ' (' + paths.length + ' file)',
+      deletions: paths
+    });
+    setStatus('deleteAlbumStatus', '✅ 已删除相册「' + esc(albumId) + '」的 ' + paths.length + ' 个文件（1 个提交）。' + refreshTip(commit.sha), 'ok');
     $('manageGrid').innerHTML = '';
     $('manageCount').textContent = '';
     manageAlbum = null; manageSha = null; manageMarked = new Set();
     $('deleteMarkedBtn').disabled = true;
-    await new Promise(r => setTimeout(r, 800));
-    loadAlbums();
+    await listAlbumIds(true);
+    await loadAlbums();
   } catch (e) {
-    box.innerHTML = '<div class="hint" style="color:var(--danger)">删除失败：' + esc(e.message) + '</div>';
+    setStatus('deleteAlbumStatus', '删除失败：' + esc(e.message), 'err');
   } finally {
     $('deleteAlbumBtn').disabled = false;
   }
 }
 
-$('deleteAlbumBtn').addEventListener('click', deleteAlbum);
-
-// ---- 上传日记 ----
-async function getDiaryEntries() {
-  try {
-    const items = await gh(`/repos/${OWNER_REPO}/contents/diary?ref=${BRANCH}`);
-    return items.filter(i => i.type === 'dir').map(i => i.name);
-  } catch (e) {
-    return [];
-  }
-}
-
-async function getDiaryMaxId() {
-  const entries = await getDiaryEntries();
-  let maxId = 0;
-  for (const name of entries) {
-    try {
-      const data = await gh(`/repos/${OWNER_REPO}/contents/diary/${name}/info.json?ref=${BRANCH}`);
-      const info = JSON.parse(atob(data.content));
-      if (typeof info.id === 'number' && info.id > maxId) maxId = info.id;
-    } catch (e) { /* 忽略单个日记读取失败 */ }
-  }
-  return maxId;
-}
-
-async function submitDiary() {
-  const token = $('token').value.trim();
-  const dateStr = $('diaryDate').value.trim();
-  const timeStr = $('diaryTime').value.trim();
-  const content = $('diaryContent').value.trim();
-  const images = $('diaryImages').value.split('\n').map(s => s.trim()).filter(Boolean);
-  const mood = $('diaryMood').value.trim();
-  const location = $('diaryLocation').value.trim();
-  const tags = $('diaryTags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-
-  if (!token) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请先填写 GitHub Token</div>'; return; }
-  if (!dateStr) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请填写日期</div>'; return; }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">日期格式应为 YYYY-MM-DD，例如 2026-09-15</div>'; return; }
-  if (content.length === 0 && images.length === 0) { $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">请至少填写正文或添加一张图片</div>'; return; }
-
-  $('submitDiaryBtn').disabled = true;
-  $('diaryStatus').innerHTML = '<div class="hint">正在上传…</div>';
-  try {
-    // 计算下一个 id
-    const maxId = await getDiaryMaxId();
-    const id = maxId + 1;
-    // 生成目录名：日期-序号
-    const folder = dateStr + '-' + id;
-
-    // 构造时间（默认 12:00）
-    let isoDate = dateStr;
-    if (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr)) {
-      isoDate = dateStr + 'T' + timeStr + ':00+08:00';
-    } else {
-      isoDate = dateStr + 'T12:00:00+08:00';
-    }
-
-    // info.json
-    const info = {
-      id: id,
-      date: isoDate,
-      images: images,
-      location: location,
-      mood: mood,
-      tags: tags
-    };
-    const infoRaw = JSON.stringify(info, null, '\t');
-    const infoContent = infoRaw.split('\n').map(l => l.replace(/\s+$/, '')).join('\n') + '\n';
-
-    // content.md
-    const mdContent = content ? content + '\n' : '';
-
-    // 依次上传两个文件
-    await gh(`/repos/${OWNER_REPO}/contents/diary/${folder}/info.json`, 'PUT', {
-      message: 'diary: add ' + folder,
-      content: btoa(unescape(encodeURIComponent(infoContent))),
-      branch: BRANCH
-    });
-    await gh(`/repos/${OWNER_REPO}/contents/diary/${folder}/content.md`, 'PUT', {
-      message: 'diary: add ' + folder + ' content',
-      content: btoa(unescape(encodeURIComponent(mdContent))),
-      branch: BRANCH
-    });
-
-    $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--success)">✅ 日记已上传（' + esc(folder) + '）' + (images.length > 0 ? '，含 ' + images.length + ' 张图片' : '') + '。<br>回到博客三连击 logo 刷新缓存后，日记页即可显示</div>';
-    // 清空表单
-    $('diaryDate').value = '';
-    $('diaryTime').value = '';
-    $('diaryMood').value = '';
-    $('diaryLocation').value = '';
-    $('diaryTags').value = '';
-    $('diaryImages').value = '';
-    $('diaryContent').value = '';
-    refreshDiaryPreview();
-  } catch (e) {
-    $('diaryStatus').innerHTML = '<div class="hint" style="color:var(--danger)">上传失败：' + esc(e.message) + '</div>';
-  } finally {
-    $('submitDiaryBtn').disabled = false;
-  }
-}
-
+/* ---------- 日记 ---------- */
 function refreshDiaryPreview() {
   const urls = $('diaryImages').value.split('\n').map(s => s.trim()).filter(Boolean);
-  $('diaryPreview').innerHTML = '';
+  const box = $('diaryPreview');
+  box.innerHTML = '';
   urls.slice(0, 24).forEach(u => {
     const item = document.createElement('div');
     item.className = 'pitem';
@@ -698,92 +1122,199 @@ function refreshDiaryPreview() {
     img.alt = '';
     img.onerror = () => { img.style.opacity = '.25'; };
     item.appendChild(img);
-    $('diaryPreview').appendChild(item);
+    box.appendChild(item);
   });
 }
 
-$('submitDiaryBtn').addEventListener('click', submitDiary);
-$('diaryImages').addEventListener('input', refreshDiaryPreview);
-// 默认填今天日期
-(function() { $('diaryDate').value = new Date().toISOString().slice(0, 10); })();
+async function submitDiary() {
+  const dateStr = $('diaryDate').value.trim();
+  const timeStr = $('diaryTime').value.trim();
+  const content = $('diaryContent').value.trim();
+  const rawImages = $('diaryImages').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const mood = $('diaryMood').value.trim();
+  const location = $('diaryLocation').value.trim();
+  const tags = parseTags($('diaryTags').value);
 
-// ---- 提交 ----
-$('submitBtn').addEventListener('click', async () => {
-  const token = $('token').value.trim();
-  const albumId = $('albumId').value.trim();
-  const urls = getUrls();
-  if (!token) { setStatus('请先填写 GitHub Token', 'err'); return; }
-  if (!albumId) { setStatus('请填写相册名', 'err'); return; }
-  if (urls.length === 0) { setStatus('请至少粘贴一个图片链接', 'err'); return; }
-  if (!/^[a-zA-Z0-9-_]+$/.test(albumId)) { setStatus('相册名只能包含字母、数字、短横线、下划线', 'err'); return; }
+  if (!$('token').value.trim()) { setStatus('diaryStatus', '请先填写 GitHub Token', 'err'); return; }
+  if (!dateStr) { setStatus('diaryStatus', '请填写日期', 'err'); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { setStatus('diaryStatus', '日期格式应为 YYYY-MM-DD，例如 2026-09-15', 'err'); return; }
+  if (!content && !rawImages.length) { setStatus('diaryStatus', '请至少填写正文或添加一张图片', 'err'); return; }
 
-  // 记住 token 和相册
-  if ($('rememberToken').checked) localStorage.setItem(LS_TOKEN, token);
-  else localStorage.removeItem(LS_TOKEN);
-  localStorage.setItem(LS_ALBUM, albumId);
-
-  $('submitBtn').disabled = true;
-  setStatus('正在写入…', 'info');
-  try {
-    const found = await getAlbumInfo(albumId);
-    let album, existingSha = null;
-    if (found) {
-      album = found.json;
-      existingSha = found.data.sha;
-    } else {
-      const today = new Date().toISOString().slice(0, 10);
-      album = {
-        id: albumId,
-        title: $('albumTitle').value.trim() || albumId,
-        description: $('albumDesc').value.trim() || '',
-        cover: $('albumCover').value.trim() || '',
-        date: today,
-        location: '',
-        tags: $('albumTags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
-        password: '',
-        photos: []
-      };
-    }
-    const coverVal = $('albumCover').value.trim();
-    if (coverVal) album.cover = coverVal;
-    if (!album.cover && urls.length > 0) album.cover = urls[0];
-
-    const existingPhotos = album.photos || [];
-    const idSet = new Set(existingPhotos.map(p => p.id));
-    let n = 0;
-    urls.forEach(u => {
-      let pid = albumId + '-photo-' + (existingPhotos.length + n + 1);
-      while (idSet.has(pid)) { n++; pid = albumId + '-photo-' + (existingPhotos.length + n + 1); }
-      idSet.add(pid);
-      existingPhotos.push({ id: pid, src: u, alt: String(existingPhotos.length + n + 1), title: String(existingPhotos.length + n + 1), tags: [] });
-      n++;
-    });
-    album.photos = existingPhotos;
-
-    const raw = JSON.stringify(album, null, '\t');
-    const newContent = raw.split('\n').map(l => l.replace(/\s+$/, '')).join('\n') + '\n';
-    const putBody = {
-      message: 'album: add ' + urls.length + ' photo(s) to ' + albumId,
-      content: btoa(unescape(encodeURIComponent(newContent))),
-      branch: BRANCH
-    };
-    if (existingSha) putBody.sha = existingSha;
-    const result = await gh(`/repos/${OWNER_REPO}/contents/albums/${albumId}/info.json`, 'PUT', putBody);
-    setStatus(
-      '✅ 成功！已向相册 <b>' + esc(albumId) + '</b> 添加 ' + urls.length + ' 张图片（共 ' + existingPhotos.length + ' 张）。<br>' +
-      '提交：<code>' + result.content.sha.slice(0, 7) + '</code><br>' +
-      '下一步：回到博客页面，3 秒内连续点击左上角 logo/站点标题 3 次刷新缓存。',
-      'ok'
-    );
-    $('links').value = '';
-    refreshPreview();
-    loadAlbums();
-  } catch (e) {
-    setStatus('❌ 失败：' + esc(e.message), 'err');
-  } finally {
-    $('submitBtn').disabled = false;
+  const images = [];
+  const badImages = [];
+  rawImages.forEach(u => {
+    const n = normalizeLink(u);
+    if (n) images.push(n); else badImages.push(u);
+  });
+  if (badImages.length) {
+    setStatus('diaryStatus', '这些图片链接不是合法的 http(s) 地址，请先修正：<br><code>' + badImages.map(esc).join('</code><br><code>') + '</code>', 'err');
+    return;
   }
-});
+
+  $('submitDiaryBtn').disabled = true;
+  setStatus('diaryStatus', '正在上传…', 'info');
+  try {
+    const id = await nextDiaryId();          // 1 次请求（原版是 N 次）
+    const folder = dateStr + '-' + id;
+
+    let isoDate;
+    if (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr)) isoDate = dateStr + 'T' + timeStr + ':00+08:00';
+    else isoDate = dateStr + 'T12:00:00+08:00';
+
+    const info = { id, date: isoDate, images, location, mood, tags };
+    const infoContent = stringifyJson(info);
+    const mdContent = content ? content + '\n' : '';
+
+    // 两个文件一次提交，不会出现「有 info 没正文」的中间态
+    const commit = await commitChanges({
+      message: 'diary: add ' + folder,
+      upserts: [
+        { path: 'diary/' + folder + '/info.json', content: infoContent },
+        { path: 'diary/' + folder + '/content.md', content: mdContent }
+      ]
+    });
+
+    setStatus('diaryStatus',
+      '✅ 日记已上传（<code>' + esc(folder) + '</code>）' +
+      (images.length ? '，含 ' + images.length + ' 张图片' : '') +
+      '。<br>正文和元信息在同一个提交里，不会出现半成品状态。' +
+      refreshTip(commit.sha), 'ok');
+
+    $('diaryDate').value = todayStr();
+    $('diaryTime').value = '';
+    $('diaryMood').value = '';
+    $('diaryLocation').value = '';
+    $('diaryTags').value = '';
+    $('diaryImages').value = '';
+    $('diaryContent').value = '';
+    refreshDiaryPreview();
+  } catch (e) {
+    setStatus('diaryStatus', '上传失败：' + esc(e.message), 'err');
+  } finally {
+    $('submitDiaryBtn').disabled = false;
+  }
+}
+
+/* ---------- 初始化 ---------- */
+function initApp() {
+  // 恢复记住的配置
+  const savedToken = localStorage.getItem(LS.token);
+  if (savedToken) { $('token').value = savedToken; $('rememberToken').checked = true; }
+  const savedImgbedToken = localStorage.getItem(LS.imgbedToken);
+  if (savedImgbedToken) { $('imgbedToken').value = savedImgbedToken; $('rememberImgbedToken').checked = true; }
+  const savedBase = localStorage.getItem(LS.imgbedBase);
+  $('imgbedBase').placeholder = DEFAULT_IMGBED;
+  if (savedBase) $('imgbedBase').value = savedBase;
+  const savedChannel = localStorage.getItem(LS.channel);
+  if (savedChannel) $('uploadChannel').value = savedChannel;
+  const savedAlbum = localStorage.getItem(LS.album);
+  if (savedAlbum) $('albumId').value = savedAlbum;
+
+  // 记住开关
+  $('token').addEventListener('change', () => {
+    if ($('rememberToken').checked) localStorage.setItem(LS.token, $('token').value.trim());
+    else localStorage.removeItem(LS.token);
+    listAlbumIds(true).then(loadAlbums).catch(() => {});
+  });
+  $('rememberToken').addEventListener('change', () => {
+    if ($('rememberToken').checked) localStorage.setItem(LS.token, $('token').value.trim());
+    else localStorage.removeItem(LS.token);
+  });
+  $('imgbedToken').addEventListener('change', () => {
+    if ($('rememberImgbedToken').checked) localStorage.setItem(LS.imgbedToken, $('imgbedToken').value.trim());
+    else localStorage.removeItem(LS.imgbedToken);
+  });
+  $('rememberImgbedToken').addEventListener('change', () => {
+    if ($('rememberImgbedToken').checked) localStorage.setItem(LS.imgbedToken, $('imgbedToken').value.trim());
+    else localStorage.removeItem(LS.imgbedToken);
+  });
+  $('imgbedBase').addEventListener('change', () => localStorage.setItem(LS.imgbedBase, $('imgbedBase').value.trim()));
+  $('uploadChannel').addEventListener('change', () => localStorage.setItem(LS.channel, $('uploadChannel').value));
+
+  // 拖拽 / 选择 / 粘贴
+  const dz = $('dropzone');
+  dz.addEventListener('click', () => $('fileInput').click());
+  $('fileInput').addEventListener('change', e => {
+    const n = addFiles(e.target.files);
+    if (n) clearStatus('uploadStatus');
+    e.target.value = '';
+    renderPending();
+  });
+  ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.add('dragover');
+  }));
+  ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.remove('dragover');
+  }));
+  dz.addEventListener('drop', e => {
+    const n = addFiles(e.dataTransfer && e.dataTransfer.files);
+    if (n) setStatus('uploadStatus', '已加入 ' + n + ' 个文件，点「上传到图床」开始上传。', 'info');
+    renderPending();
+  });
+  document.addEventListener('paste', e => {
+    if (!e.clipboardData) return;
+    const files = Array.from(e.clipboardData.files || []).filter(f => /^image\//i.test(f.type));
+    if (files.length) {
+      e.preventDefault();
+      const n = addFiles(files);
+      setStatus('uploadStatus', '已从剪贴板加入 ' + n + ' 张图片，点「上传到图床」开始上传。', 'info');
+      renderPending();
+      return;
+    }
+    // 在输入框里粘贴文字时交给浏览器自己处理，别抢
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const text = e.clipboardData.getData('text');
+    if (text) {
+      const res = addUrls(text.split(/\s+/).filter(Boolean));
+      if (res.added) {
+        setStatus('uploadStatus', '已从剪贴板加入 ' + res.added + ' 个链接。', 'info');
+        renderPending();
+      }
+    }
+  });
+
+  $('uploadFilesBtn').addEventListener('click', uploadPendingFiles);
+  $('addLinksBtn').addEventListener('click', () => {
+    const res = addUrls($('links').value.split('\n').map(s => s.trim()).filter(Boolean));
+    $('links').value = '';
+    renderPending();
+    if (res.added || res.dup || res.bad) {
+      setStatus('uploadStatus',
+        '已加入 ' + res.added + ' 个链接' +
+        (res.dup ? '，跳过 ' + res.dup + ' 个重复' : '') +
+        (res.bad ? '，忽略 ' + res.bad + ' 个非法链接' : '') + '。',
+        res.bad ? 'warn' : 'ok');
+    }
+  });
+
+  $('albumId').addEventListener('change', () => {
+    localStorage.setItem(LS.album, $('albumId').value.trim());
+    markActiveAlbum($('albumId').value.trim());
+    loadAlbumIntoForm();
+  });
+  $('loadAlbumBtn').addEventListener('click', loadAlbumIntoForm);
+  $('saveAlbumBtn').addEventListener('click', saveAlbum);
+  $('loadManageBtn').addEventListener('click', loadManage);
+  $('deleteMarkedBtn').addEventListener('click', deleteMarked);
+  $('deleteAlbumBtn').addEventListener('click', deleteAlbum);
+  $('submitDiaryBtn').addEventListener('click', submitDiary);
+  $('diaryImages').addEventListener('input', refreshDiaryPreview);
+
+  // 默认值
+  $('diaryDate').value = todayStr();
+  $('albumDate').value = todayStr();
+  renderPending();
+  refreshDiaryPreview();
+
+  // 首次加载相册列表 + 若已填相册名则读一次
+  if ($('token').value.trim()) {
+    loadAlbums();
+    if ($('albumId').value.trim()) loadAlbumIntoForm();
+  }
+}
+
+guardInit();
 </script>
 </body>
 </html>
