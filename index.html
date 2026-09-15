@@ -293,8 +293,9 @@
       <option value="">不同步（只写进相册）</option>
       <option value="banner">首页横幅轮播（图片显示在首页顶部）</option>
       <option value="cards">首页图片卡片（2 列网格，每张图一张卡）</option>
+      <option value="cards-off">清理首页卡片（删除本相册生成的所有卡片）</option>
     </select>
-    <div class="hint">「横幅」把这次新增的图片追加进首页顶部轮播；「卡片」为每张图新建一篇置顶文章，在首页网格里显示成图片卡。两者都随同一次提交写入</div>
+    <div class="hint">「横幅」把这次新增的图片追加进首页顶部轮播；「卡片」为每张图新建一篇置顶文章，在首页网格里显示成图片卡。<b>首页卡片是独立文章，删相册不会自动删它们</b> —— 想清理就用最后一项。三者都随同一次提交写入</div>
 
     <div style="margin-top:16px">
       <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
@@ -321,7 +322,13 @@
       <div class="adv-body">
         <button class="btn btn-danger btn-sm" id="deleteAlbumBtn" type="button">删除整个相册文件夹</button>
         <div class="status" id="deleteAlbumStatus"></div>
-        <div class="hint">删除 <code>albums/&lt;相册名&gt;/</code> 下的全部文件（相册和所有图片都会从博客消失）。此操作不可恢复，需输入相册名二次确认</div>
+        <div class="hint">删除 <code>albums/&lt;相册名&gt;/</code> 下的全部文件，<b>并连同该相册生成的首页卡片文章一起删除</b>（相册和所有图片都会从博客消失）。此操作不可恢复，需输入相册名二次确认</div>
+
+        <div style="margin-top:18px">
+          <button class="btn btn-ghost btn-sm" id="cleanCardsBtn" type="button">只清理首页卡片</button>
+          <div class="status" id="cleanCardsStatus"></div>
+          <div class="hint">只删除 <code>posts/album-&lt;相册名&gt;-*.md</code>，<b>不动相册本身</b>。用于「相册已经删了、首页还留着一张卡片」这种情况</div>
+        </div>
       </div>
     </details>
   </div>
@@ -956,6 +963,7 @@ async function loadAlbumIntoForm() {
 /* ---------- 同步到博客首页 ---------- */
 const HOME_SYNC_BANNER = 'banner';
 const HOME_SYNC_CARDS = 'cards';
+const HOME_SYNC_CARDS_OFF = 'cards-off';
 
 // frontmatter 里的字符串一律加引号，避开 YAML 里冒号 / 井号 / 中文标点的坑
 function yamlQuote(s) {
@@ -1011,6 +1019,41 @@ function photoCardPost({ url, albumId, albumTitle, index, date }) {
     '[查看完整相册 →](' + BLOG_BASE + '/albums/' + encodeURIComponent(albumId) + '/)',
     ''
   ].join('\n');
+}
+
+// 列出某相册生成过的首页卡片文章（posts/album-<id>-*.md）
+async function listHomeCards(albumId) {
+  const prefix = 'album-' + albumId + '-';
+  try {
+    const files = await gh('/repos/' + OWNER_REPO + '/contents/posts?ref=' + BRANCH);
+    return (Array.isArray(files) ? files : [])
+      .filter(i => i.type === 'file' && i.name.startsWith(prefix) && i.name.endsWith('.md'))
+      .map(i => i.path);
+  } catch (e) {
+    if (e.status === 404) return [];   // posts/ 目录还不存在
+    throw e;
+  }
+}
+
+// 让 posts/album-<id>-1..N.md 与相册当前照片严丝合缝：
+//   每张照片一个卡片文章；多出来的旧卡片作为 deletions 返回给调用方删掉。
+// 卡片是按「相册内序号」命名的，所以每次整组重建最稳妥（不会出现序号错位）。
+function reconcileHomeCards(album, albumId, existingCardPaths) {
+  const photos = Array.isArray(album.photos) ? album.photos : [];
+  const upserts = [];
+  const keep = new Set();
+  photos.forEach((p, i) => {
+    const index = i + 1;
+    const path = 'posts/album-' + albumId + '-' + index + '.md';
+    keep.add(path);
+    upserts.push({
+      path,
+      content: photoCardPost({ url: p.src, albumId, albumTitle: album.title, index, date: album.date })
+    });
+  });
+  const deletions = (existingCardPaths || [])
+    .filter(p => !keep.has(p) && p.startsWith('posts/album-' + albumId + '-'));
+  return { upserts, deletions };
 }
 
 async function saveAlbum() {
@@ -1090,11 +1133,19 @@ async function saveAlbum() {
 
     const content = stringifyJson(album);
     const upserts = [{ path: 'albums/' + albumId + '/info.json', content }];
+    const deletions = [];
 
     // ④ 可选：同步到博客首页（和相册写在同一个 commit 里）
     const syncMode = $('homeSync').value;
     let syncNote = '';
-    if (syncMode && !fresh.length) {
+    if (syncMode === HOME_SYNC_CARDS_OFF) {
+      // 清理：和有没有新图片无关，直接把该相册已生成的卡片全删掉
+      const cards = await listHomeCards(albumId);
+      cards.forEach(p => deletions.push(p));
+      syncNote = cards.length
+        ? '<br>🧹 已删除本相册生成的 <b>' + cards.length + '</b> 篇首页卡片文章。'
+        : '<br>本相册没有生成过首页卡片，无需清理。';
+    } else if (syncMode && !fresh.length) {
       syncNote = '<br>这次没有新增图片，首页同步已跳过。';
     } else if (syncMode === HOME_SYNC_BANNER) {
       setStatus('saveStatus', '正在同步到首页横幅…', 'info');
@@ -1108,22 +1159,22 @@ async function saveAlbum() {
         syncNote = '<br>首页横幅里已经有这些图片了，没有重复添加。';
       }
     } else if (syncMode === HOME_SYNC_CARDS) {
-      const base = existing.length - fresh.length;
-      fresh.forEach((u, i) => {
-        const index = base + i + 1;
-        upserts.push({
-          path: 'posts/album-' + albumId + '-' + index + '.md',
-          content: photoCardPost({ url: u, albumId, albumTitle: album.title, index, date: album.date })
-        });
-      });
-      syncNote = '<br>🖼 已为这 <b>' + fresh.length + '</b> 张图各建一篇置顶文章（<code>posts/album-' +
-                 esc(albumId) + '-*.md</code>），首页网格里会显示成图片卡片。';
+      setStatus('saveStatus', '正在同步首页卡片…', 'info');
+      // 整组重建：保证卡片数和相册当前照片数一致，多出来的旧卡片一并删掉
+      const rec = reconcileHomeCards(album, albumId, await listHomeCards(albumId));
+      rec.upserts.forEach(u => upserts.push(u));
+      rec.deletions.forEach(p => deletions.push(p));
+      syncNote = '<br>🖼 首页卡片已同步：<b>' + rec.upserts.length + '</b> 篇置顶文章对应相册里的 <b>' +
+                 existing.length + '</b> 张照片' +
+                 (rec.deletions.length ? '，并清理了 ' + rec.deletions.length + ' 篇多余的旧卡片' : '') + '。';
     }
 
     const commit = await commitChanges({
       message: 'album: update ' + albumId + (fresh.length ? ' (+' + fresh.length + ' photo)' : '') +
-               (upserts.length > 1 ? ' + 首页同步(' + (upserts.length - 1) + ')' : ''),
-      upserts
+               (upserts.length > 1 ? ' + 首页卡片(' + (upserts.length - 1) + ')' : '') +
+               (deletions.length ? ' - 卡片(' + deletions.length + ')' : ''),
+      upserts,
+      deletions
     });
 
     const skipped = newUrls.length - fresh.length;
@@ -1232,11 +1283,22 @@ async function deleteMarked() {
       manageAlbum.cover = manageAlbum.photos[0].src;
     }
 
+    // 相册里的照片变了，首页卡片也要跟着重排。
+    // 只在该相册确实用过卡片模式（已经存在卡片文件）时才动，避免凭空给没用过的相册造卡片。
+    const cardPaths = await listHomeCards(albumId);
+    const rec = cardPaths.length
+      ? reconcileHomeCards(manageAlbum, albumId, cardPaths)
+      : { upserts: [], deletions: [] };
+
     const commit = await commitChanges({
-      message: 'album: delete ' + markedIds.length + ' photo(s) from ' + albumId,
-      upserts: [{ path: 'albums/' + albumId + '/info.json', content: stringifyJson(manageAlbum) }]
+      message: 'album: delete ' + markedIds.length + ' photo(s) from ' + albumId +
+               ((rec.upserts.length || rec.deletions.length) ? ' + 首页卡片重排' : ''),
+      upserts: [{ path: 'albums/' + albumId + '/info.json', content: stringifyJson(manageAlbum) }].concat(rec.upserts),
+      deletions: rec.deletions
     });
-    setStatus('manageStatus', '✅ 已删除 ' + markedIds.length + ' 张，剩余 ' + manageAlbum.photos.length + ' 张。' + refreshTip(commit.sha), 'ok');
+    setStatus('manageStatus', '✅ 已删除 ' + markedIds.length + ' 张，剩余 ' + manageAlbum.photos.length + ' 张。' +
+      (rec.deletions.length ? '<br>🧹 同时清理了 ' + rec.deletions.length + ' 篇对应的首页卡片文章。' : '') +
+      refreshTip(commit.sha), 'ok');
     await loadManage();
     await listAlbumIds(true);
     await loadAlbums();
@@ -1260,17 +1322,32 @@ async function deleteAlbum() {
   setStatus('deleteAlbumStatus', '正在删除…', 'info');
   try {
     // 一次拿到目录下全部文件，然后一个 commit 全删掉（不再逐文件 DELETE）
-    const files = await gh('/repos/' + OWNER_REPO + '/contents/albums/' + encodeURIComponent(albumId) + '?ref=' + BRANCH);
-    const paths = (Array.isArray(files) ? files : []).filter(i => i.type === 'file').map(i => i.path);
-    if (!paths.length) {
-      setStatus('deleteAlbumStatus', '相册「' + esc(albumId) + '」不存在或已为空，无需删除', 'info');
+    let paths = [];
+    try {
+      const files = await gh('/repos/' + OWNER_REPO + '/contents/albums/' + encodeURIComponent(albumId) + '?ref=' + BRANCH);
+      paths = (Array.isArray(files) ? files : []).filter(i => i.type === 'file').map(i => i.path);
+    } catch (e) {
+      if (e.status !== 404) throw e;   // 相册目录已经没了也不要紧，下面还有卡片要清
+    }
+
+    // 关键：连同这个相册生成的首页卡片一起删。
+    // 否则首页会留着一张点不进去的孤儿卡片（删相册 ≠ 删文章）。
+    const cardPaths = await listHomeCards(albumId);
+
+    if (!paths.length && !cardPaths.length) {
+      setStatus('deleteAlbumStatus', '相册「' + esc(albumId) + '」不存在或已为空，也没有关联的首页卡片，无需删除', 'info');
       return;
     }
+
     const commit = await commitChanges({
-      message: 'album: delete folder ' + albumId + ' (' + paths.length + ' file)',
-      deletions: paths
+      message: 'album: delete folder ' + albumId + ' (' + paths.length + ' file)' +
+               (cardPaths.length ? ' + 首页卡片(' + cardPaths.length + ')' : ''),
+      deletions: paths.concat(cardPaths)
     });
-    setStatus('deleteAlbumStatus', '✅ 已删除相册「' + esc(albumId) + '」的 ' + paths.length + ' 个文件（1 个提交）。' + refreshTip(commit.sha), 'ok');
+    setStatus('deleteAlbumStatus',
+      '✅ 已删除相册「' + esc(albumId) + '」的 ' + paths.length + ' 个文件' +
+      (cardPaths.length ? ' 和 <b>' + cardPaths.length + '</b> 篇首页卡片文章' : '') +
+      '（1 个提交）。' + refreshTip(commit.sha), 'ok');
     $('manageGrid').innerHTML = '';
     $('manageCount').textContent = '';
     manageAlbum = null; manageSha = null; manageMarked = new Set();
@@ -1281,6 +1358,41 @@ async function deleteAlbum() {
     setStatus('deleteAlbumStatus', '删除失败：' + esc(e.message), 'err');
   } finally {
     $('deleteAlbumBtn').disabled = false;
+  }
+}
+
+// 只清理首页卡片，不动相册。用于相册已经删掉、卡片还留在首页的情况。
+async function cleanHomeCards() {
+  const albumId = $('albumId').value.trim();
+  if (!$('token').value.trim()) { setStatus('cleanCardsStatus', '请先填写 GitHub Token', 'err'); return; }
+  if (!albumId) { setStatus('cleanCardsStatus', '请先在上方填写相册名', 'err'); return; }
+  if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) { setStatus('cleanCardsStatus', '相册名只能包含字母、数字、短横线、下划线', 'err'); return; }
+
+  $('cleanCardsBtn').disabled = true;
+  setStatus('cleanCardsStatus', '正在查找…', 'info');
+  try {
+    const cards = await listHomeCards(albumId);
+    if (!cards.length) {
+      setStatus('cleanCardsStatus', '相册「' + esc(albumId) + '」没有生成过首页卡片，无需清理', 'info');
+      return;
+    }
+    if (!confirm('将删除相册「' + albumId + '」生成的 ' + cards.length + ' 篇首页卡片文章：\n\n' +
+                 cards.map(p => '  ' + p).join('\n') +
+                 '\n\n相册本身不受影响。确定吗？')) {
+      setStatus('cleanCardsStatus', '已取消', 'info');
+      return;
+    }
+    setStatus('cleanCardsStatus', '正在删除…', 'info');
+    const commit = await commitChanges({
+      message: 'home: clean ' + cards.length + ' card post(s) of album ' + albumId,
+      deletions: cards
+    });
+    setStatus('cleanCardsStatus', '✅ 已删除 <b>' + cards.length + '</b> 篇首页卡片文章（1 个提交）。' +
+      refreshTip(commit.sha), 'ok');
+  } catch (e) {
+    setStatus('cleanCardsStatus', '清理失败：' + esc(e.message), 'err');
+  } finally {
+    $('cleanCardsBtn').disabled = false;
   }
 }
 
@@ -1473,6 +1585,7 @@ function initApp() {
   $('loadManageBtn').addEventListener('click', loadManage);
   $('deleteMarkedBtn').addEventListener('click', deleteMarked);
   $('deleteAlbumBtn').addEventListener('click', deleteAlbum);
+  $('cleanCardsBtn').addEventListener('click', cleanHomeCards);
   $('submitDiaryBtn').addEventListener('click', submitDiary);
   $('diaryImages').addEventListener('input', refreshDiaryPreview);
 
