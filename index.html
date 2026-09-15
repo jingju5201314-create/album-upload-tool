@@ -290,12 +290,12 @@
 
     <label for="homeSync" style="margin-top:16px">同步到博客首页</label>
     <select id="homeSync">
-      <option value="">不同步（只写进相册）</option>
-      <option value="banner">首页横幅轮播（图片显示在首页顶部）</option>
+      <option value="">不新建卡片（只更新相册；已有卡片会自动刷新）</option>
+      <option value="banner">首页横幅轮播（并刷新已有卡片）</option>
       <option value="cards">首页相册卡片（一个相册一张卡，推荐）</option>
       <option value="cards-off">清理首页卡片（删除本相册生成的所有卡片）</option>
     </select>
-    <div class="hint">「横幅」把这次新增的图片追加进首页顶部轮播；「相册卡片」为<b>整个相册</b>建一篇置顶文章（封面 = 相册封面，正文放其余照片）。<b>往同一个相册继续传图，更新的是同一张卡，不会越传越多。</b>几种模式都随同一次提交写入</div>
+    <div class="hint">「相册卡片」为<b>整个相册</b>建一篇置顶文章：封面 = 最新上传的那张，正文按<b>新 → 旧</b>排成一行 4 张。<b>只要卡片已存在，每次保存都会自动刷新它</b>（张数 / 封面 / 照片列表），所以首页和相册永远对得上。「横幅」是把图片追加进首页顶部轮播。</div>
 
     <div style="margin-top:16px">
       <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
@@ -1172,42 +1172,53 @@ async function saveAlbum() {
 
     // ④ 可选：同步到博客首页（和相册写在同一个 commit 里）
     const syncMode = $('homeSync').value;
-    let syncNote = '';
+    const existingCards = await listHomeCards(albumId);
+    const notes = [];
+
     if (syncMode === HOME_SYNC_CARDS_OFF) {
       // 清理：和有没有新图片无关，直接把该相册已生成的卡片全删掉
-      const cards = await listHomeCards(albumId);
-      cards.forEach(p => deletions.push(p));
-      syncNote = cards.length
-        ? '<br>🧹 已删除本相册生成的 <b>' + cards.length + '</b> 篇首页卡片文章。'
-        : '<br>本相册没有生成过首页卡片，无需清理。';
-    } else if (syncMode && !fresh.length) {
-      syncNote = '<br>这次没有新增图片，首页同步已跳过。';
-    } else if (syncMode === HOME_SYNC_BANNER) {
-      setStatus('saveStatus', '正在同步到首页横幅…', 'info');
-      const s = await fetchSettingsJson();
-      const added = appendToBanner(s.json, fresh);
-      if (added.length) {
-        upserts.push({ path: 'settings.json', content: stringifyJson(s.json) });
-        syncNote = '<br>🖼 已把 <b>' + added.length + '</b> 张图追加到首页横幅轮播，现在共 <b>' +
-                   (s.json.site.banner.desktop || []).length + '</b> 张。';
-      } else {
-        syncNote = '<br>首页横幅里已经有这些图片了，没有重复添加。';
+      existingCards.forEach(p => deletions.push(p));
+      notes.push(existingCards.length
+        ? '🧹 已删除本相册生成的 <b>' + existingCards.length + '</b> 篇首页卡片文章'
+        : '本相册没有生成过首页卡片，无需清理');
+    } else {
+      // 横幅：把这次新增的图追加进首页轮播（自动去重）
+      if (syncMode === HOME_SYNC_BANNER && fresh.length) {
+        setStatus('saveStatus', '正在同步到首页横幅…', 'info');
+        const s = await fetchSettingsJson();
+        const added = appendToBanner(s.json, fresh);
+        if (added.length) {
+          upserts.push({ path: 'settings.json', content: stringifyJson(s.json) });
+          notes.push('🖼 已把 <b>' + added.length + '</b> 张图追加到首页横幅轮播，现在共 <b>' +
+                     (s.json.site.banner.desktop || []).length + '</b> 张');
+        } else {
+          notes.push('首页横幅里已经有这些图片了，没有重复添加');
+        }
       }
-    } else if (syncMode === HOME_SYNC_CARDS) {
-      setStatus('saveStatus', '正在同步首页卡片…', 'info');
-      // 整组重建：保证卡片数和相册当前照片数一致，多出来的旧卡片一并删掉
-      const rec = reconcileHomeCards(album, albumId, await listHomeCards(albumId));
-      rec.upserts.forEach(u => upserts.push(u));
-      rec.deletions.forEach(p => deletions.push(p));
-      syncNote = '<br>🖼 首页相册卡片已更新：<b>' + esc(album.title || albumId) + '</b>（对应相册里的 <b>' +
-                 existing.length + '</b> 张照片）' +
-                 (rec.deletions.length ? '，并清理了 ' + rec.deletions.length + ' 篇旧格式卡片' : '') + '。';
-    }
 
+      // 卡片：选了「相册卡片」就新建/重建；否则只要卡片**已经存在**也必须刷新它。
+      // 否则换了同步方式之后，卡片会停在旧快照 —— 张数、封面、照片列表全都对不上相册。
+      const wantCard = syncMode === HOME_SYNC_CARDS;
+      if (wantCard || existingCards.length) {
+        setStatus('saveStatus', '正在同步首页卡片…', 'info');
+        const rec = reconcileHomeCards(album, albumId, existingCards);
+        rec.upserts.forEach(u => upserts.push(u));
+        rec.deletions.forEach(p => deletions.push(p));
+        notes.push((wantCard ? '🖼 首页相册卡片已更新：' : '♻️ 已有的首页卡片已自动刷新：') +
+                   '<b>' + esc(album.title || albumId) + '</b>（对应相册里的 <b>' + existing.length + '</b> 张照片）' +
+                   (rec.deletions.length ? '，并清理了 ' + rec.deletions.length + ' 篇旧格式卡片' : ''));
+      }
+    }
+    const syncNote = notes.length ? '<br>' + notes.map(n => n + '。').join('<br>') : '';
+
+    const touchedBanner = upserts.some(u => u.path === 'settings.json');
+    const touchedCards  = upserts.some(u => u.path.indexOf('posts/album-') === 0) ||
+                          deletions.some(p => p.indexOf('posts/album-') === 0);
     const commit = await commitChanges({
       message: 'album: update ' + albumId + (fresh.length ? ' (+' + fresh.length + ' photo)' : '') +
-               (upserts.length > 1 ? ' + 首页卡片(' + (upserts.length - 1) + ')' : '') +
-               (deletions.length ? ' - 卡片(' + deletions.length + ')' : ''),
+               (touchedBanner ? ' + 首页横幅' : '') +
+               (touchedCards ? ' + 首页卡片' : '') +
+               (deletions.length ? ' - 清理(' + deletions.length + ')' : ''),
       upserts,
       deletions
     });
