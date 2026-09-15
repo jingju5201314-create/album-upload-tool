@@ -652,9 +652,53 @@ function normalizeImgbedUrl(src, base) {
   return base + '/file/' + s.replace(/^file\//, '');
 }
 
-async function imgbedUpload(file) {
+// 把文件名转成纯 ASCII。ImgBed 遇到中文/空格文件名会出现
+// 「附件传上去了但登记失败 → /file/ 404」的 500，所以上传前先洗一遍。
+function safeFileName(name) {
+  const n = String(name || '');
+  const dot = n.lastIndexOf('.');
+  let base = dot > 0 ? n.slice(0, dot) : n;
+  let ext = dot > 0 ? n.slice(dot + 1) : '';
+  base = base
+    .replace(/[^\x20-\x7E]/g, '')          // 去掉所有非 ASCII（中文、全角符号等）
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')     // 空格和其余特殊字符换成下划线
+    .replace(/[._-]{2,}/g, '_')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 60);
+  ext = ext.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 8);
+  if (!base) base = 'image_' + Date.now().toString(36);
+  return ext ? base + '.' + ext : base;
+}
+
+function uploadError(message, retryable) {
+  const e = new Error(message);
+  e.retryable = !!retryable;
+  return e;
+}
+
+const UPLOAD_MAX_ATTEMPTS = 3;
+
+async function imgbedUpload(file, attempt) {
+  attempt = attempt || 1;
+  try {
+    return await imgbedUploadOnce(file);
+  } catch (e) {
+    if (e.retryable && attempt < UPLOAD_MAX_ATTEMPTS) {
+      setStatus('uploadStatus',
+        '「' + esc(file.name) + '」第 ' + attempt + ' 次失败（' + esc(e.message.slice(0, 90)) + '），正在重试…', 'warn');
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+      return imgbedUpload(file, attempt + 1);
+    }
+    if (e.retryable && attempt > 1) {
+      e.message += '（已自动重试 ' + (attempt - 1) + ' 次仍失败，稍后可再点一次「上传到图床」）';
+    }
+    throw e;
+  }
+}
+
+async function imgbedUploadOnce(file) {
   const token = $('imgbedToken').value.trim();
-  if (!token) throw new Error('请先填写图床上传令牌（ImgBed 后台 → API Token 管理）');
+  if (!token) throw uploadError('请先填写图床上传令牌（ImgBed 后台 → API Token 管理）', false);
 
   const base = imgbedBase();
   const channel = $('uploadChannel').value;
@@ -662,7 +706,16 @@ async function imgbedUpload(file) {
   if (channel) qs.set('uploadChannel', channel);
 
   const fd = new FormData();
-  fd.append('file', file, file.name || 'image.png');
+  // 扩展名可能被过滤掉（例如 DSC_0001.照片），用 MIME 类型补回来
+  const MIME_EXT = {
+    'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+    'image/gif': 'gif', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/svg+xml': 'svg'
+  };
+  let uploadName = safeFileName(file.name);
+  if (!/\.[a-z0-9]+$/i.test(uploadName) && MIME_EXT[file.type]) {
+    uploadName += '.' + MIME_EXT[file.type];
+  }
+  fd.append('file', file, uploadName);
 
   const headers = {};
   if (token) headers['Authorization'] = token;
@@ -675,7 +728,7 @@ async function imgbedUpload(file) {
       body: fd
     });
   } catch (e) {
-    throw new Error('连接图床失败：' + e.message + '（检查图床地址 / 网络 / 广告拦截插件）');
+    throw uploadError('连接图床失败：' + e.message + '（检查图床地址 / 网络 / 广告拦截插件）', true);
   }
 
   const text = await res.text();
@@ -684,14 +737,15 @@ async function imgbedUpload(file) {
 
   if (!res.ok) {
     if (res.status === 401) {
-      throw new Error('图床令牌无效或已过期（401）——请到 ImgBed 后台「API Token 管理」重新生成');
+      throw uploadError('图床令牌无效或已过期（401）——请到 ImgBed 后台「API Token 管理」重新生成', false);
     }
     const detail = data && (data.error || data.message) ? (data.error || data.message) : (text || '').slice(0, 160);
-    throw new Error('图床上传失败（HTTP ' + res.status + '）：' + detail);
+    // 5xx 多半是 GitHub 侧临时故障（附件可能已建但没登记），值得自动重试
+    throw uploadError('图床上传失败（HTTP ' + res.status + '）：' + detail, res.status >= 500);
   }
 
   const url = normalizeImgbedUrl(pickUploadedSrc(data), base);
-  if (!url) throw new Error('图床返回成功但没解析出图片地址：' + JSON.stringify(data).slice(0, 200));
+  if (!url) throw uploadError('图床返回成功但没解析出图片地址：' + JSON.stringify(data).slice(0, 200), false);
   return url;
 }
 
