@@ -288,6 +288,14 @@
     <label for="albumTags">标签（逗号分隔）</label>
     <input type="text" id="albumTags" placeholder="旅行, 风景">
 
+    <label for="homeSync" style="margin-top:16px">同步到博客首页</label>
+    <select id="homeSync">
+      <option value="">不同步（只写进相册）</option>
+      <option value="banner">首页横幅轮播（图片显示在首页顶部）</option>
+      <option value="cards">首页图片卡片（2 列网格，每张图一张卡）</option>
+    </select>
+    <div class="hint">「横幅」把这次新增的图片追加进首页顶部轮播；「卡片」为每张图新建一篇置顶文章，在首页网格里显示成图片卡。两者都随同一次提交写入</div>
+
     <div style="margin-top:16px">
       <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
     </div>
@@ -945,6 +953,62 @@ async function loadAlbumIntoForm() {
   }
 }
 
+/* ---------- 同步到博客首页 ---------- */
+const HOME_SYNC_BANNER = 'banner';
+const HOME_SYNC_CARDS = 'cards';
+
+// frontmatter 里的字符串一律加引号，避开 YAML 里冒号 / 井号 / 中文标点的坑
+function yamlQuote(s) {
+  return '"' + String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\r\n]+/g, ' ')
+    .trim() + '"';
+}
+
+async function fetchSettingsJson() {
+  const data = await gh('/repos/' + OWNER_REPO + '/contents/settings.json?ref=' + BRANCH);
+  return { json: JSON.parse(base64ToUtf8(data.content)), sha: data.sha };
+}
+
+// 把图片追加进 settings.json 的 banner.desktop / banner.mobile（自动去重）
+function appendToBanner(settings, urls) {
+  if (!settings.site || typeof settings.site !== 'object') settings.site = {};
+  if (!settings.site.banner || typeof settings.site.banner !== 'object') settings.site.banner = {};
+  const b = settings.site.banner;
+  const desktop = Array.isArray(b.desktop) ? b.desktop.slice() : [];
+  const mobile = Array.isArray(b.mobile) ? b.mobile.slice() : [];
+  const have = new Set(desktop.concat(mobile));
+  const added = urls.filter(u => !have.has(u));
+  added.forEach(u => { desktop.push(u); mobile.push(u); });
+  b.desktop = desktop;
+  b.mobile = mobile;
+  return added;
+}
+
+// 一张图 = 一篇置顶文章。首页文章列表切成 grid 后，就是图片卡片墙
+function photoCardPost({ url, albumId, albumTitle, index, date }) {
+  const name = albumTitle || albumId;
+  return [
+    '---',
+    'title: ' + yamlQuote('相册 · ' + name + '（' + index + '）'),
+    'published: ' + (date || todayStr()),
+    'description: ' + yamlQuote('来自相册「' + name + '」'),
+    'image: ' + url,
+    'tags: [相册]',
+    'category: 相册',
+    'draft: false',
+    'pinned: true',
+    'priority: ' + index,
+    '---',
+    '',
+    '![](' + url + ')',
+    '',
+    '来自相册「' + name + '」。',
+    ''
+  ].join('\n');
+}
+
 async function saveAlbum() {
   const albumId = $('albumId').value.trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) {
@@ -1021,9 +1085,41 @@ async function saveAlbum() {
     if (!album.cover && existing.length) album.cover = existing[0].src;
 
     const content = stringifyJson(album);
+    const upserts = [{ path: 'albums/' + albumId + '/info.json', content }];
+
+    // ④ 可选：同步到博客首页（和相册写在同一个 commit 里）
+    const syncMode = $('homeSync').value;
+    let syncNote = '';
+    if (syncMode && !fresh.length) {
+      syncNote = '<br>这次没有新增图片，首页同步已跳过。';
+    } else if (syncMode === HOME_SYNC_BANNER) {
+      setStatus('saveStatus', '正在同步到首页横幅…', 'info');
+      const s = await fetchSettingsJson();
+      const added = appendToBanner(s.json, fresh);
+      if (added.length) {
+        upserts.push({ path: 'settings.json', content: stringifyJson(s.json) });
+        syncNote = '<br>🖼 已把 <b>' + added.length + '</b> 张图追加到首页横幅轮播，现在共 <b>' +
+                   (s.json.site.banner.desktop || []).length + '</b> 张。';
+      } else {
+        syncNote = '<br>首页横幅里已经有这些图片了，没有重复添加。';
+      }
+    } else if (syncMode === HOME_SYNC_CARDS) {
+      const base = existing.length - fresh.length;
+      fresh.forEach((u, i) => {
+        const index = base + i + 1;
+        upserts.push({
+          path: 'posts/album-' + albumId + '-' + index + '.md',
+          content: photoCardPost({ url: u, albumId, albumTitle: album.title, index, date: album.date })
+        });
+      });
+      syncNote = '<br>🖼 已为这 <b>' + fresh.length + '</b> 张图各建一篇置顶文章（<code>posts/album-' +
+                 esc(albumId) + '-*.md</code>），首页网格里会显示成图片卡片。';
+    }
+
     const commit = await commitChanges({
-      message: 'album: update ' + albumId + (fresh.length ? ' (+' + fresh.length + ' photo)' : ''),
-      upserts: [{ path: 'albums/' + albumId + '/info.json', content }]
+      message: 'album: update ' + albumId + (fresh.length ? ' (+' + fresh.length + ' photo)' : '') +
+               (upserts.length > 1 ? ' + 首页同步(' + (upserts.length - 1) + ')' : ''),
+      upserts
     });
 
     const skipped = newUrls.length - fresh.length;
@@ -1031,6 +1127,7 @@ async function saveAlbum() {
       '✅ 相册 <b>' + esc(albumId) + '</b> 已保存：本次新增 <b>' + fresh.length + '</b> 张，当前共 <b>' + existing.length + '</b> 张。' +
       (skipped > 0 ? '<br>有 ' + skipped + ' 张链接已存在于该相册，已自动跳过。' : '') +
       (failed.length ? '<br>⚠️ 还有 ' + failed.length + ' 张图片没上传成功，这次没有写进去。' : '') +
+      syncNote +
       refreshTip(commit.sha), 'ok');
 
     items = items.filter(i => i.status !== 'ready');
