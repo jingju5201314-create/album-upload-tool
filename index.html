@@ -898,13 +898,33 @@ async function saveAlbum() {
     return;
   }
 
-  const newUrls = collectReadyUrls();
-  const idle = items.filter(i => i.status === 'idle' || i.status === 'error').length;
-
   $('saveAlbumBtn').disabled = true;
-  setStatus('saveStatus', '正在写入…', 'info');
   try {
+    // ① 还有没上传的文件，先自动传掉（传失败的不会写进去）
+    const pendingFiles = items.filter(i => i.file && (i.status === 'idle' || i.status === 'error'));
+    if (pendingFiles.length) {
+      setStatus('saveStatus', '检测到 ' + pendingFiles.length + ' 张图片还没上传，正在自动上传…', 'info');
+      await uploadPendingFiles();
+    }
+
+    const newUrls = collectReadyUrls();
+    const failed = items.filter(i => i.status === 'error');
+
+    // ② 读取现有相册，判断它是不是已经存在
+    setStatus('saveStatus', '正在读取相册…', 'info');
     const found = await fetchAlbum(albumId);
+    const existingCount = found && Array.isArray(found.json.photos) ? found.json.photos.length : 0;
+
+    // ③ 没有图片可写、相册也不存在 → 直接拒绝，绝不创建空相册
+    if (!newUrls.length && existingCount === 0) {
+      const detail = failed.length
+        ? '有 <b>' + failed.length + '</b> 张图片上传失败：<br><code>' + failed.slice(0, 3).map(f => esc(f.error || '未知错误')).join('</code><br><code>') + '</code>'
+        : '请先拖入图片并点「上传到图床」，或者粘贴图片链接后点「加入下面的列表」。';
+      setStatus('saveStatus', '❌ 没有可写入的图片，已中止（<b>不会</b>创建空相册）。<br>' + detail, 'err');
+      return;
+    }
+
+    setStatus('saveStatus', '正在写入…', 'info');
     let album;
     if (found) {
       album = found.json;
@@ -956,7 +976,7 @@ async function saveAlbum() {
     setStatus('saveStatus',
       '✅ 相册 <b>' + esc(albumId) + '</b> 已保存：本次新增 <b>' + fresh.length + '</b> 张，当前共 <b>' + existing.length + '</b> 张。' +
       (skipped > 0 ? '<br>有 ' + skipped + ' 张链接已存在于该相册，已自动跳过。' : '') +
-      (idle > 0 ? '<br>⚠️ 还有 ' + idle + ' 张图片没上传成功，这次没有写进去。' : '') +
+      (failed.length ? '<br>⚠️ 还有 ' + failed.length + ' 张图片没上传成功，这次没有写进去。' : '') +
       refreshTip(commit.sha), 'ok');
 
     items = items.filter(i => i.status !== 'ready');
