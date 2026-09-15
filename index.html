@@ -292,10 +292,10 @@
     <select id="homeSync">
       <option value="">不同步（只写进相册）</option>
       <option value="banner">首页横幅轮播（图片显示在首页顶部）</option>
-      <option value="cards">首页图片卡片（2 列网格，每张图一张卡）</option>
+      <option value="cards">首页相册卡片（一个相册一张卡，推荐）</option>
       <option value="cards-off">清理首页卡片（删除本相册生成的所有卡片）</option>
     </select>
-    <div class="hint">「横幅」把这次新增的图片追加进首页顶部轮播；「卡片」为每张图新建一篇置顶文章，在首页网格里显示成图片卡。<b>首页卡片是独立文章，删相册不会自动删它们</b> —— 想清理就用最后一项。三者都随同一次提交写入</div>
+    <div class="hint">「横幅」把这次新增的图片追加进首页顶部轮播；「相册卡片」为<b>整个相册</b>建一篇置顶文章（封面 = 相册封面，正文放其余照片）。<b>往同一个相册继续传图，更新的是同一张卡，不会越传越多。</b>几种模式都随同一次提交写入</div>
 
     <div style="margin-top:16px">
       <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
@@ -994,40 +994,57 @@ function appendToBanner(settings, urls) {
   return added;
 }
 
-// 一张图 = 一篇置顶文章。首页文章列表切成 grid 后，就是图片卡片墙。
-// 注意：正文里不要再插一次图片 —— 主题默认 showCoverInContent=true，
-//      会把 frontmatter 的 image 当封面渲染进正文，再插一次就是两张一模一样的图。
+// 一个相册 = 一张首页卡片（posts/album-<id>.md）。
+// 这样往同一个相册里追加照片时，首页还是同一张卡（只更新封面/正文），不会越传越多。
+// 注意：封面那张不在正文里重复放 —— 主题默认 showCoverInContent=true，
+//      会把 frontmatter 的 image 渲染进正文，再放一次就是两张一模一样的图。
 const BLOG_BASE = 'https://ling520.ccwu.cc/blog';
 
-function photoCardPost({ url, albumId, albumTitle, index, date }) {
-  const name = albumTitle || albumId;
-  return [
+function albumCardPost(album, albumId) {
+  const name = album.title || albumId;
+  const photos = (Array.isArray(album.photos) ? album.photos : [])
+    .map(p => p && p.src).filter(Boolean);
+  const cover = album.cover || photos[0] || '';
+  const rest = photos.filter(u => u !== cover);   // 封面由主题渲染，这里只放其余的
+
+  const head = [
     '---',
-    'title: ' + yamlQuote('相册 · ' + name + '（' + index + '）'),
-    'published: ' + (date || todayStr()),
-    'description: ' + yamlQuote('来自相册「' + name + '」'),
-    'image: ' + url,
+    'title: ' + yamlQuote(name),
+    'published: ' + (album.date || todayStr()),
+    'description: ' + yamlQuote(album.description || ('相册，共 ' + photos.length + ' 张照片')),
+    cover ? 'image: ' + cover : null,
     'tags: [相册]',
     'category: 相册',
     'draft: false',
     'pinned: true',
-    'priority: ' + index,
+    'priority: 1',
     '---',
     '',
-    '来自相册「' + name + '」。',
-    '',
-    '[查看完整相册 →](' + BLOG_BASE + '/albums/' + encodeURIComponent(albumId) + '/)',
+    album.description || ('共 ' + photos.length + ' 张照片。'),
     ''
-  ].join('\n');
+  ].filter(l => l !== null);
+
+  if (rest.length) {
+    head.push('');
+    rest.forEach(u => { head.push('![](' + u + ')'); head.push(''); });
+  }
+
+  head.push('[查看完整相册 →](' + BLOG_BASE + '/albums/' + encodeURIComponent(albumId) + '/)');
+  head.push('');
+  return head.join('\n');
 }
 
-// 列出某相册生成过的首页卡片文章（posts/album-<id>-*.md）
+// 列出某相册生成过的首页卡片文章。
+// 兼容两种命名：新格式 posts/album-<id>.md（一个相册一张卡）
+//               旧格式 posts/album-<id>-<序号>.md（一张照片一张卡，需要被清理掉）
 async function listHomeCards(albumId) {
+  const exact = 'album-' + albumId + '.md';
   const prefix = 'album-' + albumId + '-';
   try {
     const files = await gh('/repos/' + OWNER_REPO + '/contents/posts?ref=' + BRANCH);
     return (Array.isArray(files) ? files : [])
-      .filter(i => i.type === 'file' && i.name.startsWith(prefix) && i.name.endsWith('.md'))
+      .filter(i => i.type === 'file' && i.name.endsWith('.md') &&
+                   (i.name === exact || i.name.startsWith(prefix)))
       .map(i => i.path);
   } catch (e) {
     if (e.status === 404) return [];   // posts/ 目录还不存在
@@ -1035,24 +1052,14 @@ async function listHomeCards(albumId) {
   }
 }
 
-// 让 posts/album-<id>-1..N.md 与相册当前照片严丝合缝：
-//   每张照片一个卡片文章；多出来的旧卡片作为 deletions 返回给调用方删掉。
-// 卡片是按「相册内序号」命名的，所以每次整组重建最稳妥（不会出现序号错位）。
+// 让首页卡片和相册一一对应：只保留 posts/album-<id>.md。
+// 历史上「一张照片一张卡」留下的 posts/album-<id>-*.md 会作为 deletions 返回，一并清掉。
 function reconcileHomeCards(album, albumId, existingCardPaths) {
-  const photos = Array.isArray(album.photos) ? album.photos : [];
-  const upserts = [];
-  const keep = new Set();
-  photos.forEach((p, i) => {
-    const index = i + 1;
-    const path = 'posts/album-' + albumId + '-' + index + '.md';
-    keep.add(path);
-    upserts.push({
-      path,
-      content: photoCardPost({ url: p.src, albumId, albumTitle: album.title, index, date: album.date })
-    });
-  });
+  const keepPath = 'posts/album-' + albumId + '.md';
+  const prefix = 'posts/album-' + albumId + '-';
+  const upserts = [{ path: keepPath, content: albumCardPost(album, albumId) }];
   const deletions = (existingCardPaths || [])
-    .filter(p => !keep.has(p) && p.startsWith('posts/album-' + albumId + '-'));
+    .filter(p => p !== keepPath && p.startsWith(prefix));
   return { upserts, deletions };
 }
 
@@ -1164,9 +1171,9 @@ async function saveAlbum() {
       const rec = reconcileHomeCards(album, albumId, await listHomeCards(albumId));
       rec.upserts.forEach(u => upserts.push(u));
       rec.deletions.forEach(p => deletions.push(p));
-      syncNote = '<br>🖼 首页卡片已同步：<b>' + rec.upserts.length + '</b> 篇置顶文章对应相册里的 <b>' +
-                 existing.length + '</b> 张照片' +
-                 (rec.deletions.length ? '，并清理了 ' + rec.deletions.length + ' 篇多余的旧卡片' : '') + '。';
+      syncNote = '<br>🖼 首页相册卡片已更新：<b>' + esc(album.title || albumId) + '</b>（对应相册里的 <b>' +
+                 existing.length + '</b> 张照片）' +
+                 (rec.deletions.length ? '，并清理了 ' + rec.deletions.length + ' 篇旧格式卡片' : '') + '。';
     }
 
     const commit = await commitChanges({
