@@ -986,7 +986,11 @@ function appendToBanner(settings, urls) {
   return added;
 }
 
-// 一张图 = 一篇置顶文章。首页文章列表切成 grid 后，就是图片卡片墙
+// 一张图 = 一篇置顶文章。首页文章列表切成 grid 后，就是图片卡片墙。
+// 注意：正文里不要再插一次图片 —— 主题默认 showCoverInContent=true，
+//      会把 frontmatter 的 image 当封面渲染进正文，再插一次就是两张一模一样的图。
+const BLOG_BASE = 'https://ling520.ccwu.cc/blog';
+
 function photoCardPost({ url, albumId, albumTitle, index, date }) {
   const name = albumTitle || albumId;
   return [
@@ -1002,9 +1006,9 @@ function photoCardPost({ url, albumId, albumTitle, index, date }) {
     'priority: ' + index,
     '---',
     '',
-    '![](' + url + ')',
-    '',
     '来自相册「' + name + '」。',
+    '',
+    '[查看完整相册 →](' + BLOG_BASE + '/albums/' + encodeURIComponent(albumId) + '/)',
     ''
   ].join('\n');
 }
