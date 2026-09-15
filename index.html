@@ -1000,12 +1000,39 @@ function appendToBanner(settings, urls) {
 //      会把 frontmatter 的 image 渲染进正文，再放一次就是两张一模一样的图。
 const BLOG_BASE = 'https://ling520.ccwu.cc/blog';
 
+// 主题正文里的图片被包成 display:block（每张独占一行），想「一行 N 张」只能用 HTML 表格。
+// 已确认可行：marked 的 tokenizer 不检查 options.html（原始 HTML 原样通过），
+// 且 sanitize-html 白名单放行 table/tr/td 以及 img 的 width/alt/loading 属性。
+// 给 img 一个像素宽度，是为了不让表格被图片原始尺寸撑爆（max-width:100% 会再收缩适配）。
+function photoTable(urls, perRow) {
+  const CELL = 160;
+  const rows = [];
+  for (let i = 0; i < urls.length; i += perRow) {
+    const cells = [];
+    for (let j = 0; j < perRow; j++) {
+      const u = urls[i + j];
+      cells.push(u
+        ? '<td><img src="' + u + '" width="' + CELL + '" alt="" loading="lazy" /></td>'
+        : '<td></td>');
+    }
+    rows.push('<tr>' + cells.join('') + '</tr>');
+  }
+  return '<table>' + rows.join('') + '</table>';
+}
+
+const PHOTOS_PER_ROW = 4;
+
 function albumCardPost(album, albumId) {
   const name = album.title || albumId;
   const photos = (Array.isArray(album.photos) ? album.photos : [])
     .map(p => p && p.src).filter(Boolean);
-  const cover = album.cover || photos[0] || '';
-  const rest = photos.filter(u => u !== cover);   // 封面由主题渲染，这里只放其余的
+  const newest = photos[photos.length - 1] || '';
+  // 相册封面如果是「自动取第一张」，就改用最新上传的那张 —— 让新图排在最上面；
+  // 用户手动填过封面的话，尊重他填的值。
+  const autoCover = !album.cover || album.cover === photos[0];
+  const cover = (autoCover && newest) ? newest : (album.cover || newest);
+  // 正文里剩下的一律「新 → 旧」。封面那张不重复放（主题会把封面渲染进正文）。
+  const grid = photos.filter(u => u !== cover).reverse();
 
   const head = [
     '---',
@@ -1024,9 +1051,10 @@ function albumCardPost(album, albumId) {
     ''
   ].filter(l => l !== null);
 
-  if (rest.length) {
+  if (grid.length) {
     head.push('');
-    rest.forEach(u => { head.push('![](' + u + ')'); head.push(''); });
+    head.push(photoTable(grid, PHOTOS_PER_ROW));
+    head.push('');
   }
 
   head.push('[查看完整相册 →](' + BLOG_BASE + '/albums/' + encodeURIComponent(albumId) + '/)');
