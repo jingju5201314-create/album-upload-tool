@@ -269,7 +269,8 @@
     <input type="text" id="albumTitle" placeholder="留空则用相册名">
 
     <label for="albumCover">封面图 URL</label>
-    <input type="text" id="albumCover" placeholder="留空则用第一张图">
+    <input type="text" id="albumCover" placeholder="留空 = 自动用最新上传的那张">
+    <div class="hint">填相册里某张图的链接 → 会跟随最新上传自动更新；填外部链接 → 固定用你填的</div>
 
     <label for="albumDesc">相册描述</label>
     <input type="text" id="albumDesc" placeholder="可选">
@@ -613,6 +614,18 @@ async function fetchAlbum(albumId) {
     if (e.status === 404) return null;
     throw e;
   }
+}
+
+// 相册里的照片按「新 → 旧」排列。
+// 相册页 /albums/<id>/ 是直接按 info.json 里 photos 数组的顺序渲染的，
+// 所以只要这个数组是新的在前，相册页就是新图在上。
+// 排序依据是 photo id 的数字后缀（id 形如 <相册名>-photo-3，后缀就是上传序号）。
+function sortPhotosNewestFirst(photos) {
+  const seq = p => {
+    const m = /-photo-(\d+)$/.exec(String((p && p.id) || ''));
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  return (Array.isArray(photos) ? photos.slice() : []).sort((a, b) => seq(b) - seq(a));
 }
 
 // 解析已有 photo id 的数字后缀，取 max+1，避免删图后编号撞车
@@ -1024,15 +1037,12 @@ const PHOTOS_PER_ROW = 4;
 
 function albumCardPost(album, albumId) {
   const name = album.title || albumId;
+  // info.json 的 photos 已经是「新 → 旧」（saveAlbum 会重排），这里保持同样的顺序
   const photos = (Array.isArray(album.photos) ? album.photos : [])
     .map(p => p && p.src).filter(Boolean);
-  const newest = photos[photos.length - 1] || '';
-  // 相册封面如果是「自动取第一张」，就改用最新上传的那张 —— 让新图排在最上面；
-  // 用户手动填过封面的话，尊重他填的值。
-  const autoCover = !album.cover || album.cover === photos[0];
-  const cover = (autoCover && newest) ? newest : (album.cover || newest);
-  // 正文里剩下的一律「新 → 旧」。封面那张不重复放（主题会把封面渲染进正文）。
-  const grid = photos.filter(u => u !== cover).reverse();
+  const cover = album.cover || photos[0] || '';
+  // 剩下的按原顺序（新 → 旧）。封面那张不重复放（主题会把封面渲染进正文）。
+  const grid = photos.filter(u => u !== cover);
 
   const head = [
     '---',
@@ -1157,14 +1167,22 @@ async function saveAlbum() {
     const fresh = newUrls.filter(u => !have.has(u));
     if (fresh.length) {
       const ids = nextPhotoIds(existing, albumId, fresh.length);
-      const base = existing.length;
       fresh.forEach((u, i) => {
-        existing.push({ id: ids[i], src: u, alt: String(base + i + 1), title: String(base + i + 1), tags: [] });
+        const num = (String(ids[i]).match(/(\d+)$/) || [, ''])[1];   // 上传序号，跟位置无关
+        existing.push({ id: ids[i], src: u, alt: num, title: num, tags: [] });
       });
     }
-    album.photos = existing;
+    // 统一按「新 → 旧」重排：相册页直接读这个数组，所以新图会显示在最上面
+    album.photos = sortPhotosNewestFirst(existing);
 
-    if (!album.cover && existing.length) album.cover = existing[0].src;
+    // 封面规则：
+    //   cover 指向相册里某张照片（工具自动设的）→ 视为「自动」→ 跟随最新上传的那张
+    //   cover 是外部 URL（不在相册里）          → 视为「手动指定」→ 原样保留
+    const formCover = $('albumCover').value.trim();
+    const coverIsInternal = album.photos.some(p => p && p.src === formCover);
+    album.cover = (formCover && !coverIsInternal)
+      ? formCover
+      : (album.photos.length ? album.photos[0].src : formCover);
 
     const content = stringifyJson(album);
     const upserts = [{ path: 'albums/' + albumId + '/info.json', content }];
@@ -1322,11 +1340,13 @@ async function deleteMarked() {
   $('deleteMarkedBtn').disabled = true;
   setStatus('manageStatus', '正在删除…', 'info');
   try {
-    manageAlbum.photos = (manageAlbum.photos || []).filter(p => !markedIds.includes(p.id));
+    manageAlbum.photos = sortPhotosNewestFirst(
+      (manageAlbum.photos || []).filter(p => !markedIds.includes(p.id))
+    );
     if (manageAlbum.photos.length === 0) {
       manageAlbum.cover = '';
     } else if (!manageAlbum.photos.some(p => p.src === manageAlbum.cover)) {
-      manageAlbum.cover = manageAlbum.photos[0].src;
+      manageAlbum.cover = manageAlbum.photos[0].src;   // 删掉的正好是封面 → 用最新那张
     }
 
     // 相册里的照片变了，首页卡片也要跟着重排。
