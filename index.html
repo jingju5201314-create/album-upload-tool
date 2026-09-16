@@ -319,7 +319,10 @@
     <div class="manage-bar" style="margin-top:16px">
       <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
       <button class="btn btn-ghost" id="recompressBtn" type="button">🗜 压缩重传本相册</button>
+      <button class="btn btn-ghost" id="thumbBtn" type="button">🖼 生成卡片缩略图</button>
     </div>
+    <div class="status" id="thumbStatus"></div>
+    <div class="hint">「生成卡片缩略图」给每张照片另存一张 <b>320px 小图</b>，<b>首页相册卡片的正文改用小图</b>，相册页仍然读原图、画质不变。首页卡片正文图是按 160px 显示的，却一直下载 1600px 原图，占了首页一半流量 —— 做完省下约 1.9 MB。</div>
     <div class="hint">「压缩重传」用来把<b>已经传上去的大图</b>重新压小：逐张下载原图 → 压缩 → 重传，<b>原地替换地址</b>，照片数量／顺序／标签／封面都不变，首页卡片和轮播里引用到的一起换。适合修复历史上没走压缩的图（常见 200 KB–1 MB 一张 → 压完通常几十 KB）。</div>
     <div class="status" id="saveStatus"></div>
   </div>
@@ -340,10 +343,10 @@
 
     <div class="manage-bar" style="margin-top:16px">
       <button class="btn btn-ghost" id="recompressSiteBtn" type="button">🗜 压缩重传首页图片</button>
-      <span class="hint" style="margin:0">轮播 1920px ／ 图标 256px</span>
+      <span class="hint" style="margin:0">轮播 1280px ／ 图标 256px</span>
     </div>
     <div class="status" id="siteImgStatus"></div>
-    <div class="hint">处理 <code>settings.json</code> 里引用的图片：<b>首页轮播、头像、导航图标、站点 logo、favicon</b>。按用途分别压缩 —— 轮播按最长边 1920px（要铺满屏），图标类按 256px（favicon 和 14px 小图标用大图纯属浪费），压缩后<b>原地替换引用</b>。压缩无收益的图原样保留。</div>
+    <div class="hint">处理 <code>settings.json</code> 里引用的图片：<b>首页轮播、头像、导航图标、站点 logo、favicon</b>。按用途分别压缩 —— 轮播按最长边 1280px（背景带模糊遮罩，1280 足够），图标类按 256px（favicon 和 14px 小图标用大图纯属浪费），压缩后<b>原地替换引用</b>。压缩无收益的图原样保留。</div>
 
     <details>
       <summary>危险操作：删除整个相册</summary>
@@ -1267,17 +1270,19 @@ const PHOTOS_PER_ROW = 4;
 function albumCardPost(album, albumId) {
   const name = album.title || albumId;
   // info.json 的 photos 已经是「新 → 旧」（saveAlbum 会重排），这里保持同样的顺序
-  const photos = (Array.isArray(album.photos) ? album.photos : [])
-    .map(p => p && p.src).filter(Boolean);
-  const cover = album.cover || photos[0] || '';
-  // 剩下的按原顺序（新 → 旧）。封面那张不重复放（主题会把封面渲染进正文）。
-  const grid = photos.filter(u => u !== cover);
+  const list = (Array.isArray(album.photos) ? album.photos : []).filter(p => p && p.src);
+  const cover = album.cover || (list[0] && list[0].src) || '';
+  // 正文改用缩略图（320px 小图）：首页卡片里的图只按 160px 显示，
+  // 一直拉原图会让首页白白多传 2 MB。还没生成缩略图的照片自动回退到原图。
+  const grid = list
+    .filter(p => p.src !== cover)
+    .map(p => p.thumb || p.src);
 
   const head = [
     '---',
     'title: ' + yamlQuote(name),
     'published: ' + (album.date || todayStr()),
-    'description: ' + yamlQuote(album.description || ('相册，共 ' + photos.length + ' 张照片')),
+    'description: ' + yamlQuote(album.description || ('相册，共 ' + list.length + ' 张照片')),
     cover ? 'image: ' + cover : null,
     'tags: [相册]',
     'category: 相册',
@@ -1286,7 +1291,7 @@ function albumCardPost(album, albumId) {
     'priority: 1',
     '---',
     '',
-    album.description || ('共 ' + photos.length + ' 张照片。'),
+    album.description || ('共 ' + list.length + ' 张照片。'),
     ''
   ].filter(l => l !== null);
 
@@ -1528,7 +1533,8 @@ function remapSettingsImages(json, urlMap) {
  * 这里按用途分别压：轮播要铺满屏 → 1920px；favicon / 导航图标 / 头像 → 256px。
  * 完成后原地替换引用，一个提交写入。
  */
-const SITE_IMAGE_EDGE = { banner: 1920, icon: 256 };
+// 轮播背景本身带模糊遮罩，1280 足够，文件能小一半；favicon/小图标用 256 绰绰有余
+const SITE_IMAGE_EDGE = { banner: 1280, icon: 256 };
 
 async function recompressSiteImages() {
   if (!$('imgbedToken').value.trim()) {
@@ -1623,6 +1629,123 @@ async function recompressSiteImages() {
       '<br>别忘了刷新博客缓存（后台「更新博客」或三击左上角 logo）。', 'ok');
   } catch (e) {
     setStatus('siteImgStatus', '❌ 站点图片压缩失败：' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- 生成卡片缩略图 ----------
+ * 首页相册卡片正文里的图按 160px 显示，却一直加载 1600px 原图，占了首页一半流量。
+ * 这里给每张照片另存一张 320px 小图，写进 info.json 的 photos[].thumb，
+ * 卡片正文改用 thumb；相册页仍然读 src（原图），画质不受影响。
+ * 已经生成过的会跳过，可以重复点。原图本来就比缩略图还小的，直接复用原地址。
+ */
+const CARD_THUMB_EDGE = 320;
+
+async function generateCardThumbs() {
+  const albumId = $('albumId').value.trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) {
+    setStatus('thumbStatus', '请先在上面填好相册名（英文，仅字母数字短横线下划线）', 'err');
+    return;
+  }
+  if (!$('imgbedToken').value.trim()) {
+    setStatus('thumbStatus', '请先在「图床上传令牌」里填好 API Token —— 缩略图要上传', 'err');
+    return;
+  }
+  if (!confirm('给相册「' + albumId + '」的每张照片生成 320px 缩略图，并让首页卡片改用缩略图？\n\n' +
+               '· 相册页不受影响，仍然显示原图\n' +
+               '· 已经生成过的照片会跳过，可以重复点\n' +
+               '· 会多出一些小文件存在图床里（每张约 10 KB）')) return;
+
+  const btn = $('thumbBtn');
+  btn.disabled = true;
+  clearStatus('thumbStatus');
+
+  try {
+    setStatus('thumbStatus', '正在读取相册…', 'info');
+    const found = await fetchAlbum(albumId);
+    if (!found || !Array.isArray(found.json.photos) || !found.json.photos.length) {
+      setStatus('thumbStatus', '这个相册不存在，或者里面还没有照片', 'err');
+      return;
+    }
+    const album = found.json;
+    const todo = album.photos.filter(p => p && p.src && !p.thumb);
+
+    if (!todo.length) {
+      // 缩略图都齐了，但仍然刷新一次卡片，确保卡片正文用的是缩略图
+      setStatus('thumbStatus', '所有照片都已有缩略图，正在刷新首页卡片…', 'info');
+      const cards = await listHomeCards(albumId);
+      if (!cards.length) {
+        setStatus('thumbStatus', '所有照片都已有缩略图；这个相册没有生成过首页卡片，无需处理。', 'warn');
+        return;
+      }
+      const rec = reconcileHomeCards(album, albumId, cards);
+      await commitChanges({ message: 'album: refresh card ' + albumId + ' (use thumbs)', upserts: rec.upserts, deletions: rec.deletions });
+      setStatus('thumbStatus', '✅ 首页卡片已刷新为缩略图版本。别忘了刷新博客缓存。', 'ok');
+      return;
+    }
+
+    let done = 0, ok = 0, fail = 0, savedBytes = 0, reused = 0;
+    const queue = todo.slice();
+
+    async function worker() {
+      while (queue.length) {
+        const photo = queue.shift();
+        done++;
+        try {
+          const res = await fetch(photo.src, { cache: 'no-store' });
+          if (!res.ok) throw new Error('下载失败 HTTP ' + res.status);
+          const blob = await res.blob();
+          const asFile = new File([blob], String(photo.id || 'photo') + '-thumb.jpg', { type: blob.type || 'image/jpeg' });
+
+          const packed = await maybeCompressImage(asFile, true, CARD_THUMB_EDGE);
+          if (!packed.saved) {
+            // 原图本来就够小，直接拿原图当缩略图，省一次上传
+            photo.thumb = photo.src;
+            reused++;
+          } else {
+            photo.thumb = await imgbedUpload(packed.file);
+            savedBytes += packed.saved;
+          }
+          ok++;
+        } catch (e) {
+          fail++;
+        } finally {
+          setStatus('thumbStatus', '生成中 ' + done + '/' + todo.length +
+            '…（成功 ' + ok + '，失败 ' + fail + '）', 'info');
+        }
+      }
+    }
+    await Promise.all([worker(), worker()]);
+
+    if (!ok) {
+      setStatus('thumbStatus', '❌ 一张都没成功（' + fail + ' 张失败）。检查图床令牌和网络后再试。', 'err');
+      return;
+    }
+
+    setStatus('thumbStatus', '正在写回相册和首页卡片…', 'info');
+    const upserts = [{ path: 'albums/' + albumId + '/info.json', content: stringifyJson(album) }];
+    const deletions = [];
+    const cards = await listHomeCards(albumId);
+    if (cards.length) {
+      const rec = reconcileHomeCards(album, albumId, cards);
+      rec.upserts.forEach(u => upserts.push(u));
+      rec.deletions.forEach(p => deletions.push(p));
+    }
+    await commitChanges({
+      message: 'album: thumbs ' + albumId + ' (' + ok + ' photo' + (cards.length ? ' + 首页卡片' : '') + ')',
+      upserts: upserts,
+      deletions: deletions
+    });
+
+    setStatus('thumbStatus',
+      '✅ 缩略图生成完成：<b>' + ok + '</b> 张（其中 ' + reused + ' 张原图本来就小，直接复用）。' +
+      (savedBytes > 0 ? '<br>首页卡片正文改成小图后，这部分体积省下约 <b>' + (savedBytes / 1024 / 1024).toFixed(2) + ' MB</b>。' : '') +
+      (cards.length ? '<br>首页卡片已同步刷新。' : '<br>（这个相册还没有首页卡片，下次保存时会自动用上缩略图）') +
+      (fail ? '<br>⚠️ 有 ' + fail + ' 张失败，可以再点一次重试（成功的会跳过）。' : '') +
+      '<br>别忘了刷新博客缓存（后台「更新博客」或三击左上角 logo）。', 'ok');
+  } catch (e) {
+    setStatus('thumbStatus', '❌ 生成失败：' + esc(e.message), 'err');
   } finally {
     btn.disabled = false;
   }
@@ -2163,6 +2286,7 @@ function initApp() {
   $('loadAlbumBtn').addEventListener('click', loadAlbumIntoForm);
   $('saveAlbumBtn').addEventListener('click', saveAlbum);
   $('recompressBtn').addEventListener('click', recompressAlbum);
+  $('thumbBtn').addEventListener('click', generateCardThumbs);
   $('recompressSiteBtn').addEventListener('click', recompressSiteImages);
   $('loadManageBtn').addEventListener('click', loadManage);
   $('deleteMarkedBtn').addEventListener('click', deleteMarked);
