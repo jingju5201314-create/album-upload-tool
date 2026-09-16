@@ -302,9 +302,11 @@
     </select>
     <div class="hint">「相册卡片」为<b>整个相册</b>建一篇置顶文章：封面 = 最新上传的那张，正文按<b>新 → 旧</b>排成一行 4 张。<b>只要卡片已存在，每次保存都会自动刷新它</b>（张数 / 封面 / 照片列表），所以首页和相册永远对得上。「横幅」是把图片追加进首页顶部轮播。</div>
 
-    <div style="margin-top:16px">
+    <div class="manage-bar" style="margin-top:16px">
       <button class="btn btn-primary" id="saveAlbumBtn" type="button">写入相册（图片 + 上面的信息）</button>
+      <button class="btn btn-ghost" id="recompressBtn" type="button">🗜 压缩重传本相册</button>
     </div>
+    <div class="hint">「压缩重传」用来把<b>已经传上去的大图</b>重新压小：逐张下载原图 → 压缩 → 重传，<b>原地替换地址</b>，照片数量／顺序／标签／封面都不变，首页卡片和轮播里引用到的一起换。适合修复历史上没走压缩的图（常见 200 KB–1 MB 一张 → 压完通常几十 KB）。</div>
     <div class="status" id="saveStatus"></div>
   </div>
 
@@ -743,9 +745,9 @@ function compressWanted() {
   return !el || el.checked;
 }
 
-async function maybeCompressImage(file) {
+async function maybeCompressImage(file, force) {
   const pass = { file, note: '', saved: 0 };
-  if (!compressWanted()) return pass;
+  if (!force && !compressWanted()) return pass;
   if (!file || !/^image\//i.test(file.type)) return pass;
   // GIF 可能是动图，SVG 是矢量，都不动
   if (/gif|svg/i.test(file.type)) return pass;
@@ -1333,6 +1335,138 @@ async function saveAlbum() {
   }
 }
 
+/* ---------- 压缩重传已有相册 ----------
+ * 历史图片是 API 直传上去的，没走后台的「默认压缩 / 转 WebP」，所以常有 200 KB–1 MB 一张，
+ * 而相册页是直接铺 photos[].src 的，于是首屏能到 4 MB 以上。
+ * 这里逐张：下载 → 重编码 → 重新上传 → 原地替换 src。
+ * id / alt / title / tags / 顺序都不动；首页卡片和轮播里引用到的一起换。
+ * 压不出收益（本来就小）的图原样保留。旧文件会留在图床里成为孤儿，可自行清理。
+ */
+async function recompressAlbum() {
+  const albumId = $('albumId').value.trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(albumId)) {
+    setStatus('saveStatus', '请先在上面填好相册名（英文，仅字母数字短横线下划线）', 'err');
+    return;
+  }
+  if (!$('imgbedToken').value.trim()) {
+    setStatus('saveStatus', '请先在「图床上传令牌」里填好 API Token —— 压缩后要重新上传', 'err');
+    return;
+  }
+  if (!confirm('把相册「' + albumId + '」里的照片全部重新压缩并替换？\n\n' +
+               '· 照片数量、顺序、标签、封面都不变，只把每张换成压缩后的新地址\n' +
+               '· 压不出收益的图会原样保留\n' +
+               '· 旧文件会留在图床里成为孤儿文件，需要的话以后再单独清理\n\n' +
+               '图片多的时候会花一点时间，请不要关掉页面。')) return;
+
+  const btn = $('recompressBtn');
+  btn.disabled = true;
+  clearStatus('saveStatus');
+
+  try {
+    setStatus('saveStatus', '正在读取相册…', 'info');
+    const found = await fetchAlbum(albumId);
+    if (!found || !Array.isArray(found.json.photos) || !found.json.photos.length) {
+      setStatus('saveStatus', '这个相册不存在，或者里面还没有照片', 'err');
+      return;
+    }
+    const album = found.json;
+    const photos = album.photos;
+
+    let done = 0, replaced = 0, skipped = 0, failed = 0, savedBytes = 0;
+    const urlMap = new Map();            // 老地址 → 新地址
+    const queue = photos.slice();
+
+    async function worker() {
+      while (queue.length) {
+        const photo = queue.shift();
+        const oldSrc = String((photo && photo.src) || '');
+        done++;
+        try {
+          if (!oldSrc) throw new Error('这张没有 src');
+          const res = await fetch(oldSrc, { cache: 'no-store' });
+          if (!res.ok) throw new Error('下载失败 HTTP ' + res.status);
+          const blob = await res.blob();
+          const sub = (blob.type || 'image/jpeg').split('/')[1] || 'jpg';
+          const ext = (sub === 'jpeg' ? 'jpg' : sub.replace(/[^a-z0-9]/gi, '')) || 'jpg';
+          const asFile = new File([blob], String(photo.id || 'photo') + '.' + ext, { type: blob.type || 'image/jpeg' });
+
+          const packed = await maybeCompressImage(asFile, true);   // 这里强制压缩，不看开关
+          if (!packed.saved) { skipped++; return; }
+
+          const newUrl = await imgbedUpload(packed.file);
+          photo.src = newUrl;
+          urlMap.set(oldSrc, newUrl);
+          replaced++;
+          savedBytes += packed.saved;
+        } catch (e) {
+          failed++;
+        } finally {
+          setStatus('saveStatus', '压缩重传中 ' + done + '/' + photos.length +
+            '…（已替换 ' + replaced + '，跳过 ' + skipped + '，失败 ' + failed + '）', 'info');
+        }
+      }
+    }
+    await Promise.all([worker(), worker()]);
+
+    if (!replaced) {
+      setStatus('saveStatus', '没有可压缩的空间（' + skipped + ' 张压缩无收益' +
+        (failed ? '，' + failed + ' 张下载失败' : '') + '），未做任何修改。', 'warn');
+      return;
+    }
+
+    if (album.cover && urlMap.has(album.cover)) album.cover = urlMap.get(album.cover);
+
+    setStatus('saveStatus', '正在写回相册…', 'info');
+    const upserts = [{ path: 'albums/' + albumId + '/info.json', content: stringifyJson(album) }];
+    const deletions = [];
+
+    // 首页卡片里内嵌了每张图的地址，跟着刷新
+    const existingCards = await listHomeCards(albumId);
+    if (existingCards.length) {
+      const rec = reconcileHomeCards(album, albumId, existingCards);
+      rec.upserts.forEach(u => upserts.push(u));
+      rec.deletions.forEach(p => deletions.push(p));
+    }
+
+    // 首页轮播里引用到的一起换
+    const s = await fetchSettingsJson();
+    let bannerTouched = 0;
+    const banner = s.json.site && s.json.site.banner;
+    if (banner) {
+      for (const key of ['desktop', 'mobile']) {
+        if (!Array.isArray(banner[key])) continue;
+        banner[key] = banner[key].map(u => {
+          if (urlMap.has(u)) { bannerTouched++; return urlMap.get(u); }
+          return u;
+        });
+      }
+    }
+    if (bannerTouched) upserts.push({ path: 'settings.json', content: stringifyJson(s.json) });
+
+    await commitChanges({
+      message: 'album: recompress ' + albumId + ' (' + replaced + ' photo)' +
+               (bannerTouched ? ' + 首页横幅' : ''),
+      upserts,
+      deletions
+    });
+
+    items = items.filter(i => i.status !== 'ready');
+    renderPending();
+    setStatus('saveStatus',
+      '✅ 压缩重传完成：替换 <b>' + replaced + '</b> 张，跳过 <b>' + skipped + '</b> 张（本来就小），合计省下 <b>' +
+      (savedBytes / 1024 / 1024).toFixed(2) + ' MB</b>。' +
+      (bannerTouched ? '<br>首页轮播里 ' + bannerTouched + ' 处地址已同步。' : '') +
+      (failed ? '<br>⚠️ 有 ' + failed + ' 张失败，这些图的地址保持原样，可以再点一次重试。' : '') +
+      '<br>别忘了刷新博客缓存（后台「更新博客」或三击左上角 logo）。', 'ok');
+    await listAlbumIds(true);
+    await loadAlbums();
+  } catch (e) {
+    setStatus('saveStatus', '❌ 压缩重传失败：' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // 收集所有「已就绪」的图片链接
 function collectReadyUrls() {
   return items.filter(i => i.status === 'ready' && i.url).map(i => i.url);
@@ -1724,6 +1858,7 @@ function initApp() {
   });
   $('loadAlbumBtn').addEventListener('click', loadAlbumIntoForm);
   $('saveAlbumBtn').addEventListener('click', saveAlbum);
+  $('recompressBtn').addEventListener('click', recompressAlbum);
   $('loadManageBtn').addEventListener('click', loadManage);
   $('deleteMarkedBtn').addEventListener('click', deleteMarked);
   $('deleteAlbumBtn').addEventListener('click', deleteAlbum);
