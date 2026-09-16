@@ -177,8 +177,8 @@
 <div id="loginOverlay">
   <div class="login-card">
     <h2>登录</h2>
-    <div class="sub">相册图片添加工具需要验证身份</div>
-    <label for="loginUser">账号</label>
+    <div class="sub" id="loginSub">相册图片添加工具需要验证身份</div>
+    <label for="loginUser" id="loginUserLabel">账号</label>
     <input type="text" id="loginUser" placeholder="请输入账号" autocomplete="username">
     <label for="loginPass">密码</label>
     <input type="password" id="loginPass" placeholder="请输入密码" autocomplete="current-password">
@@ -195,6 +195,7 @@
   <div class="card">
     <div class="card-head"><span class="step">1</span>令牌设置</div>
 
+    <div id="tokenFields">
     <label for="token">GitHub Token<span class="hint" style="display:inline;margin-left:6px">用于读写博客配置仓库</span></label>
     <input type="password" id="token" placeholder="ghp_... 或 github_pat_..." autocomplete="off">
     <div class="remember-row">
@@ -208,11 +209,19 @@
       <input type="checkbox" id="rememberImgbedToken" checked>
       <label for="rememberImgbedToken" style="margin:0;font-weight:400">记住图床令牌</label>
     </div>
+    </div>
+
+    <div class="hint" id="proxyModeNote" style="display:none">✅ 已进入 <b>代理模式</b>：令牌保存在 Cloudflare Worker 的服务端，这个页面不需要填任何令牌。</div>
 
     <details>
-      <summary>高级选项（图床地址 / 上传渠道）</summary>
+      <summary>高级选项（代理地址 / 图床地址 / 上传渠道）</summary>
       <div class="adv-body">
-        <label for="imgbedBase">图床地址</label>
+        <label for="proxyBase">代理地址（Cloudflare Worker）<span class="hint" style="display:inline;margin-left:6px">填了就进入代理模式</span></label>
+        <input type="text" id="proxyBase" placeholder="https://xxx.yyy.workers.dev">
+        <div class="hint">留空 = <b>直连模式</b>（需要自己填上面两个令牌）。填上代理地址后<b>刷新页面</b>：登录改成校验代理口令，上面的令牌栏会隐藏，密钥全部由 Worker 服务端保管。</div>
+        <div class="status" id="proxyStatus"></div>
+
+        <label for="imgbedBase" style="margin-top:16px">图床地址</label>
         <input type="text" id="imgbedBase" placeholder="https://ling520.ccwu.cc">
         <label for="uploadChannel">上传渠道</label>
         <select id="uploadChannel">
@@ -419,12 +428,43 @@ async function tryLogin(user, pass) {
 async function doLogin() {
   const user = $('loginUser').value.trim();
   const pass = $('loginPass').value;
+  const errEl = $('loginErr');
+  const proxy = proxyBase();
+
+  if (proxy) {
+    // 代理模式：口令发给 Worker 校验，前端只有结果，没有令牌
+    const key = pass || user;
+    if (!key) { errEl.textContent = '请输入代理口令'; errEl.classList.add('show'); return; }
+    errEl.textContent = '正在校验…';
+    errEl.classList.add('show');
+    try {
+      const r = await fetch(proxy + '/api/auth', { headers: { 'X-Tool-Key': key }, cache: 'no-store' });
+      if (r.ok) {
+        localStorage.setItem(LS.toolKey, key);
+        sessionStorage.setItem(LS_AUTH, '1');
+        errEl.classList.remove('show');
+        showApp();
+        return;
+      }
+      errEl.textContent = r.status === 401
+        ? '口令不对'
+        : '代理返回 HTTP ' + r.status + '（检查 Worker 地址和部署状态）';
+    } catch (e) {
+      errEl.textContent = '连不上代理：' + e.message + '（检查地址 / 网络，workers.dev 在部分网络下会被拦）';
+    }
+    errEl.classList.add('show');
+    $('loginPass').value = '';
+    return;
+  }
+
+  // 直连模式：保持原来的本地校验
   const ok = await tryLogin(user, pass);
   if (ok) {
     sessionStorage.setItem(LS_AUTH, '1');
     showApp();
   } else {
-    $('loginErr').classList.add('show');
+    errEl.textContent = '账号或密码错误';
+    errEl.classList.add('show');
     $('loginPass').value = '';
   }
 }
@@ -436,6 +476,13 @@ function showApp() {
 }
 
 function guardInit() {
+  if (proxyMode()) {
+    // 代理模式：只需要口令，账号栏没用了
+    $('loginUserLabel').style.display = 'none';
+    $('loginUser').style.display = 'none';
+    $('loginSub').textContent = '代理模式：输入代理口令即可（密钥保存在 Worker 服务端，这个页面不存任何令牌）';
+    $('loginPass').placeholder = '请输入代理口令';
+  }
   if (sessionStorage.getItem(LS_AUTH) === '1') showApp();
   else {
     $('loginOverlay').classList.remove('hidden');
@@ -461,8 +508,27 @@ const LS = {
   channel: 'album_tool_channel',
   album: 'album_tool_last_album',
   compress: 'album_tool_compress',
-  level: 'album_tool_compress_level'
+  level: 'album_tool_compress_level',
+  proxy: 'album_tool_proxy',
+  toolKey: 'album_tool_key'
 };
+
+/* ---------- 代理模式 ----------
+ * 直连模式：令牌填在页面上（存在浏览器 localStorage）。
+ * 代理模式：填一个 Cloudflare Worker 地址，GitHub / ImgBed 的令牌放在 Worker 的
+ *          服务端环境变量里，前端一个密钥都不接触，口令也由 Worker 校验（绕不过去）。
+ * 部署完 Worker 后把地址填到下面的 PROXY_BASE，或者临时填在「高级选项 → 代理地址」里。
+ */
+const PROXY_BASE = '';   // 例：'https://album-tool.xxxx.workers.dev'
+
+function proxyBase() {
+  const el = $('proxyBase');
+  const fromUi = el && el.value ? el.value.trim() : '';
+  const fromLs = (localStorage.getItem(LS.proxy) || '').trim();
+  return String(fromUi || fromLs || PROXY_BASE).replace(/\/+$/, '');
+}
+function proxyMode() { return !!proxyBase(); }
+function toolKey() { return localStorage.getItem(LS.toolKey) || ''; }
 
 /* ---------- 通用工具 ---------- */
 function esc(s) {
@@ -542,36 +608,58 @@ function ghError(message, status) {
 }
 
 async function gh(path, method = 'GET', body = null) {
-  const token = $('token').value.trim();
-  if (!token) throw ghError('请先填写 GitHub Token', 0);
+  const proxy = proxyBase();
+  if (!proxy && !$('token').value.trim()) {
+    throw ghError('请先填写 GitHub Token（或在「高级选项」里填代理地址）', 0);
+  }
   if (method === 'GET') {
     path += (path.includes('?') ? '&' : '?') + '_ts=' + Date.now();
   }
-  const headers = {
-    Authorization: 'token ' + token,
-    'User-Agent': 'album-tool',
-    Accept: 'application/vnd.github+json'
-  };
-  const opts = { method, headers, cache: 'no-store' };
-  if (body) {
-    headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
+
   let res;
-  try {
-    res = await fetch(API + path, opts);
-  } catch (e) {
-    throw ghError('网络请求失败（可能是浏览器插件或网络拦截）：' + e.message, 0);
+  if (proxy) {
+    // 代理模式：路径 + 方法 + 请求体一起交给 Worker，由它附加密钥后转发
+    try {
+      res = await fetch(proxy + '/api/gh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tool-Key': toolKey() },
+        cache: 'no-store',
+        body: JSON.stringify({ path, method, body })
+      });
+    } catch (e) {
+      throw ghError('连接代理失败（检查 Worker 地址 / 网络）：' + e.message, 0);
+    }
+  } else {
+    const headers = {
+      Authorization: 'token ' + $('token').value.trim(),
+      'User-Agent': 'album-tool',
+      Accept: 'application/vnd.github+json'
+    };
+    const opts = { method, headers, cache: 'no-store' };
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    try {
+      res = await fetch(API + path, opts);
+    } catch (e) {
+      throw ghError('网络请求失败（可能是浏览器插件或网络拦截）：' + e.message, 0);
+    }
   }
+
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (e) { /* 非 JSON */ }
 
   if (!res.ok) {
     const detail = data && data.message ? data.message : (text || '').slice(0, 160);
-    if (res.status === 401) throw ghError('GitHub Token 无效或已过期（401）', 401);
+    if (res.status === 401) {
+      throw ghError(proxy ? '代理口令失效，请重新登录（401）' : 'GitHub Token 无效或已过期（401）', 401);
+    }
     if (res.status === 403) throw ghError('权限不足或触发速率限制（403）：' + detail, 403);
-    if (res.status === 404) throw ghError('找不到仓库/分支/文件（404）——请确认 Token 对私有仓库 ' + OWNER_REPO + ' 有 Contents 读写权限', 404);
+    if (res.status === 404) throw ghError('找不到仓库/分支/文件（404）——' + (proxy
+      ? '检查 Worker 里的 GITHUB_TOKEN 是否对 ' + OWNER_REPO + ' 有 Contents 读写权限'
+      : '请确认 Token 对私有仓库 ' + OWNER_REPO + ' 有 Contents 读写权限'), 404);
     if (res.status === 409) throw ghError('提交冲突（409），通常是有另一次提交刚发生，重试一次即可：' + detail, 409);
     if (res.status === 422) throw ghError('请求被拒绝（422）：' + detail, 422);
     throw ghError('HTTP ' + res.status + '：' + detail, res.status);
@@ -811,8 +899,9 @@ async function maybeCompressImage(file, force, maxEdge) {
 }
 
 async function imgbedUploadOnce(file) {
+  const proxy = proxyBase();
   const token = $('imgbedToken').value.trim();
-  if (!token) throw uploadError('请先填写图床上传令牌（ImgBed 后台 → API Token 管理）', false);
+  if (!proxy && !token) throw uploadError('请先填写图床上传令牌（ImgBed 后台 → API Token 管理）', false);
 
   const base = imgbedBase();
   const channel = $('uploadChannel').value;
@@ -832,17 +921,25 @@ async function imgbedUploadOnce(file) {
   fd.append('file', file, uploadName);
 
   const headers = {};
-  if (token) headers['Authorization'] = token;
+  let postUrl;
+  if (proxy) {
+    // 代理模式：图床令牌在 Worker 里，这里只带口令
+    headers['X-Tool-Key'] = toolKey();
+    postUrl = proxy + '/api/upload' + (qs.toString() ? '?' + qs.toString() : '');
+  } else {
+    if (token) headers['Authorization'] = token;
+    postUrl = base + '/upload' + (qs.toString() ? '?' + qs.toString() : '');
+  }
 
   let res;
   try {
-    res = await fetch(base + '/upload' + (qs.toString() ? '?' + qs.toString() : ''), {
+    res = await fetch(postUrl, {
       method: 'POST',
       headers,
       body: fd
     });
   } catch (e) {
-    throw uploadError('连接图床失败：' + e.message + '（检查图床地址 / 网络 / 广告拦截插件）', true);
+    throw uploadError((proxy ? '连接代理失败：' : '连接图床失败：') + e.message + '（检查地址 / 网络 / 广告拦截插件）', true);
   }
 
   const text = await res.text();
@@ -851,7 +948,9 @@ async function imgbedUploadOnce(file) {
 
   if (!res.ok) {
     if (res.status === 401) {
-      throw uploadError('图床令牌无效或已过期（401）——请到 ImgBed 后台「API Token 管理」重新生成', false);
+      throw uploadError(proxy
+        ? '代理口令失效（401）——请重新登录'
+        : '图床令牌无效或已过期（401）——请到 ImgBed 后台「API Token 管理」重新生成', false);
     }
     const detail = data && (data.error || data.message) ? (data.error || data.message) : (text || '').slice(0, 160);
     // 5xx 多半是 GitHub 侧临时故障（附件可能已建但没登记），值得自动重试
@@ -1940,6 +2039,24 @@ function initApp() {
   });
   $('imgbedBase').addEventListener('change', () => localStorage.setItem(LS.imgbedBase, $('imgbedBase').value.trim()));
   $('uploadChannel').addEventListener('change', () => localStorage.setItem(LS.channel, $('uploadChannel').value));
+
+  // 代理地址（填了就进入代理模式，刷新页面生效）
+  const savedProxy = localStorage.getItem(LS.proxy);
+  if (savedProxy) $('proxyBase').value = savedProxy;
+  $('proxyBase').addEventListener('change', () => {
+    const v = $('proxyBase').value.trim();
+    if (v) localStorage.setItem(LS.proxy, v);
+    else localStorage.removeItem(LS.proxy);
+    setStatus('proxyStatus', v
+      ? '已保存，<b>刷新页面</b>后进入代理模式（登录改成校验代理口令，上面的令牌栏会隐藏）。'
+      : '已清空，<b>刷新页面</b>后回到直连模式。', 'ok');
+  });
+
+  // 代理模式下：隐藏令牌栏，只留代理地址和提示
+  if (proxyMode()) {
+    $('tokenFields').style.display = 'none';
+    $('proxyModeNote').style.display = 'block';
+  }
   if (localStorage.getItem(LS.compress) === 'false') $('compressUpload').checked = false;
   $('compressUpload').addEventListener('change', () =>
     localStorage.setItem(LS.compress, $('compressUpload').checked ? 'true' : 'false'));
