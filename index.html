@@ -240,7 +240,12 @@
       <span id="uploadCount" class="hint" style="margin:0"></span>
       <div class="remember-row" style="margin:0">
         <input type="checkbox" id="compressUpload" checked>
-        <label for="compressUpload" style="margin:0;font-weight:400">上传前压缩（最长边 1600px → WebP）</label>
+        <label for="compressUpload" style="margin:0;font-weight:400">上传前压缩</label>
+        <select id="compressLevel" style="width:auto;margin:0;padding:4px 8px;font-size:13px">
+          <option value="1600">高清 1600px</option>
+          <option value="1280">标准 1280px</option>
+          <option value="1024">省流 1024px</option>
+        </select>
       </div>
     </div>
     <div class="status" id="uploadStatus"></div>
@@ -323,6 +328,13 @@
     </div>
     <div class="status" id="manageStatus"></div>
     <div class="hint">点图片右上角的 ✕ 标记要删除的图（可多选），再点「删除已标记的图片」保存。删除前会弹窗确认</div>
+
+    <div class="manage-bar" style="margin-top:16px">
+      <button class="btn btn-ghost" id="recompressSiteBtn" type="button">🗜 压缩重传首页图片</button>
+      <span class="hint" style="margin:0">轮播 1920px ／ 图标 256px</span>
+    </div>
+    <div class="status" id="siteImgStatus"></div>
+    <div class="hint">处理 <code>settings.json</code> 里引用的图片：<b>首页轮播、头像、导航图标、站点 logo、favicon</b>。按用途分别压缩 —— 轮播按最长边 1920px（要铺满屏），图标类按 256px（favicon 和 14px 小图标用大图纯属浪费），压缩后<b>原地替换引用</b>。压缩无收益的图原样保留。</div>
 
     <details>
       <summary>危险操作：删除整个相册</summary>
@@ -448,7 +460,8 @@ const LS = {
   imgbedBase: 'album_tool_imgbed_base',
   channel: 'album_tool_channel',
   album: 'album_tool_last_album',
-  compress: 'album_tool_compress'
+  compress: 'album_tool_compress',
+  level: 'album_tool_compress_level'
 };
 
 /* ---------- 通用工具 ---------- */
@@ -737,7 +750,7 @@ async function imgbedUpload(file, attempt) {
  * 这里在上传前统一缩到最长边 1600px 并转 WebP，实测能省 70%–85% 体积。
  * 任何一步失败都退回原文件，绝不因为压缩把上传搞挂。
  */
-const COMPRESS_MAX_EDGE = 1600;
+const COMPRESS_MAX_EDGE = 1600;   // 默认档位（下拉框可切 1280 / 1024）
 const COMPRESS_QUALITY = 0.82;
 
 function compressWanted() {
@@ -745,16 +758,24 @@ function compressWanted() {
   return !el || el.checked;
 }
 
-async function maybeCompressImage(file, force) {
+// 当前档位的最长边像素
+function compressMaxEdge() {
+  const el = $('compressLevel');
+  const v = el ? parseInt(el.value, 10) : NaN;
+  return Number.isFinite(v) && v >= 320 ? v : COMPRESS_MAX_EDGE;
+}
+
+async function maybeCompressImage(file, force, maxEdge) {
   const pass = { file, note: '', saved: 0 };
   if (!force && !compressWanted()) return pass;
+  const limit = maxEdge || compressMaxEdge();
   if (!file || !/^image\//i.test(file.type)) return pass;
   // GIF 可能是动图，SVG 是矢量，都不动
   if (/gif|svg/i.test(file.type)) return pass;
 
   try {
     const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, COMPRESS_MAX_EDGE / Math.max(bmp.width, bmp.height));
+    const scale = Math.min(1, limit / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
 
@@ -1335,6 +1356,145 @@ async function saveAlbum() {
   }
 }
 
+/* ---------- settings.json 里的图片引用重映射 ----------
+ * 把 settings.json 中所有「引用了老地址」的图片换成新地址：
+ * 首页轮播 desktop/mobile、favicon、导航图标/logo、个人头像。
+ * 传入 urlMap: 老地址 → 新地址。返回替换掉的总处数。
+ */
+function remapSettingsImages(json, urlMap) {
+  let touched = 0;
+  const swap = u => {
+    if (typeof u === 'string' && urlMap.has(u)) { touched++; return urlMap.get(u); }
+    return u;
+  };
+
+  const site = json.site && typeof json.site === 'object' ? json.site : null;
+  if (site) {
+    const banner = site.banner && typeof site.banner === 'object' ? site.banner : null;
+    if (banner) {
+      for (const key of ['desktop', 'mobile']) {
+        if (Array.isArray(banner[key])) banner[key] = banner[key].map(swap);
+      }
+    }
+    if (Array.isArray(site.favicon)) {
+      site.favicon = site.favicon.map(f => (f && typeof f === 'object' && 'src' in f) ? Object.assign({}, f, { src: swap(f.src) }) : f);
+    }
+    if (site.navbarTitle && typeof site.navbarTitle === 'object') {
+      site.navbarTitle.icon = swap(site.navbarTitle.icon);
+      site.navbarTitle.logo = swap(site.navbarTitle.logo);
+    }
+  }
+  if (json.profile && typeof json.profile === 'object') {
+    json.profile.avatar = swap(json.profile.avatar);
+  }
+  return touched;
+}
+
+/* ---------- 压缩重传首页 / 站点图片 ----------
+ * settings.json 里引用的图不在任何相册里，所以「压缩重传本相册」碰不到它们。
+ * 这里按用途分别压：轮播要铺满屏 → 1920px；favicon / 导航图标 / 头像 → 256px。
+ * 完成后原地替换引用，一个提交写入。
+ */
+const SITE_IMAGE_EDGE = { banner: 1920, icon: 256 };
+
+async function recompressSiteImages() {
+  if (!$('imgbedToken').value.trim()) {
+    setStatus('siteImgStatus', '请先在「图床上传令牌」里填好 API Token —— 压缩后要重新上传', 'err');
+    return;
+  }
+  if (!confirm('把首页轮播、头像、导航图标、站点 logo、favicon 引用的图片重新压缩并替换？\n\n' +
+               '· 轮播按最长边 1920px，图标类按最长边 256px\n' +
+               '· 压缩无收益的图原样保留\n' +
+               '· 旧文件会留在图床里成为孤儿文件\n\n' +
+               '图片多的时候会花一点时间，请不要关掉页面。')) return;
+
+  const btn = $('recompressSiteBtn');
+  btn.disabled = true;
+  clearStatus('siteImgStatus');
+
+  try {
+    setStatus('siteImgStatus', '正在读取 settings.json…', 'info');
+    const s = await fetchSettingsJson();
+    const json = s.json;
+
+    // 收收集目标：同一个地址出现在多个用途时，取最大的那个边长（宁大勿小）
+    const targets = new Map();
+    const add = (u, edge) => {
+      if (typeof u !== 'string' || !/^https?:\/\//i.test(u)) return;
+      targets.set(u, Math.max(targets.get(u) || 0, edge));
+    };
+    const site = json.site || {};
+    const banner = site.banner || {};
+    (Array.isArray(banner.desktop) ? banner.desktop : []).forEach(u => add(u, SITE_IMAGE_EDGE.banner));
+    (Array.isArray(banner.mobile) ? banner.mobile : []).forEach(u => add(u, SITE_IMAGE_EDGE.banner));
+    (Array.isArray(site.favicon) ? site.favicon : []).forEach(f => f && add(f.src, SITE_IMAGE_EDGE.icon));
+    if (site.navbarTitle) { add(site.navbarTitle.icon, SITE_IMAGE_EDGE.icon); add(site.navbarTitle.logo, SITE_IMAGE_EDGE.icon); }
+    if (json.profile) add(json.profile.avatar, SITE_IMAGE_EDGE.icon);
+
+    if (!targets.size) {
+      setStatus('siteImgStatus', 'settings.json 里没找到可处理的图片', 'warn');
+      return;
+    }
+
+    setStatus('siteImgStatus', '找到 ' + targets.size + ' 个唯一图片，开始处理…', 'info');
+    let done = 0, replaced = 0, skipped = 0, failed = 0, savedBytes = 0;
+    const urlMap = new Map();
+    const queue = [...targets.entries()];
+
+    async function worker() {
+      while (queue.length) {
+        const [oldUrl, edge] = queue.shift();
+        done++;
+        try {
+          const res = await fetch(oldUrl, { cache: 'no-store' });
+          if (!res.ok) throw new Error('下载失败 HTTP ' + res.status);
+          const blob = await res.blob();
+          const sub = (blob.type || 'image/jpeg').split('/')[1] || 'jpg';
+          const ext = (sub === 'jpeg' ? 'jpg' : sub.replace(/[^a-z0-9]/gi, '')) || 'jpg';
+          const stem = String(oldUrl.split('/').pop() || 'image').replace(/\.[^.]+$/, '').slice(0, 40) || 'image';
+          const asFile = new File([blob], stem + '.' + ext, { type: blob.type || 'image/jpeg' });
+
+          const packed = await maybeCompressImage(asFile, true, edge);
+          if (!packed.saved) { skipped++; return; }
+          urlMap.set(oldUrl, await imgbedUpload(packed.file));
+          replaced++;
+          savedBytes += packed.saved;
+        } catch (e) {
+          failed++;
+        } finally {
+          setStatus('siteImgStatus', '处理中 ' + done + '/' + targets.size +
+            '…（已替换 ' + replaced + '，跳过 ' + skipped + '，失败 ' + failed + '）', 'info');
+        }
+      }
+    }
+    await Promise.all([worker(), worker()]);
+
+    if (!replaced) {
+      setStatus('siteImgStatus', '没有可压缩的空间（' + skipped + ' 个无收益' +
+        (failed ? '，' + failed + ' 个下载失败' : '') + '），未做任何修改。', 'warn');
+      return;
+    }
+
+    const touched = remapSettingsImages(json, urlMap);
+    setStatus('siteImgStatus', '正在写回 settings.json…', 'info');
+    await commitChanges({
+      message: 'config: recompress 站点图片 (' + replaced + ' 张 / 引用 ' + touched + ' 处)',
+      upserts: [{ path: 'settings.json', content: stringifyJson(json) }],
+      deletions: []
+    });
+
+    setStatus('siteImgStatus',
+      '✅ 站点图片压缩完成：替换 <b>' + replaced + '</b> 张，跳过 <b>' + skipped + '</b> 张（本来就小），' +
+      '引用更新 <b>' + touched + '</b> 处，合计省下 <b>' + (savedBytes / 1024 / 1024).toFixed(2) + ' MB</b>。' +
+      (failed ? '<br>⚠️ 有 ' + failed + ' 个下载失败，保持原样，可以再点一次重试。' : '') +
+      '<br>别忘了刷新博客缓存（后台「更新博客」或三击左上角 logo）。', 'ok');
+  } catch (e) {
+    setStatus('siteImgStatus', '❌ 站点图片压缩失败：' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ---------- 压缩重传已有相册 ----------
  * 历史图片是 API 直传上去的，没走后台的「默认压缩 / 转 WebP」，所以常有 200 KB–1 MB 一张，
  * 而相册页是直接铺 photos[].src 的，于是首屏能到 4 MB 以上。
@@ -1428,24 +1588,14 @@ async function recompressAlbum() {
       rec.deletions.forEach(p => deletions.push(p));
     }
 
-    // 首页轮播里引用到的一起换
+    // settings.json 里引用到这些图的（轮播 / 头像 / 导航图标 / logo / favicon）一起换
     const s = await fetchSettingsJson();
-    let bannerTouched = 0;
-    const banner = s.json.site && s.json.site.banner;
-    if (banner) {
-      for (const key of ['desktop', 'mobile']) {
-        if (!Array.isArray(banner[key])) continue;
-        banner[key] = banner[key].map(u => {
-          if (urlMap.has(u)) { bannerTouched++; return urlMap.get(u); }
-          return u;
-        });
-      }
-    }
+    const bannerTouched = remapSettingsImages(s.json, urlMap);
     if (bannerTouched) upserts.push({ path: 'settings.json', content: stringifyJson(s.json) });
 
     await commitChanges({
       message: 'album: recompress ' + albumId + ' (' + replaced + ' photo)' +
-               (bannerTouched ? ' + 首页横幅' : ''),
+               (bannerTouched ? ' + 站点引用' : ''),
       upserts,
       deletions
     });
@@ -1455,7 +1605,7 @@ async function recompressAlbum() {
     setStatus('saveStatus',
       '✅ 压缩重传完成：替换 <b>' + replaced + '</b> 张，跳过 <b>' + skipped + '</b> 张（本来就小），合计省下 <b>' +
       (savedBytes / 1024 / 1024).toFixed(2) + ' MB</b>。' +
-      (bannerTouched ? '<br>首页轮播里 ' + bannerTouched + ' 处地址已同步。' : '') +
+      (bannerTouched ? '<br>settings.json 里 <b>' + bannerTouched + '</b> 处图片引用已同步（轮播／头像／图标／favicon）。' : '') +
       (failed ? '<br>⚠️ 有 ' + failed + ' 张失败，这些图的地址保持原样，可以再点一次重试。' : '') +
       '<br>别忘了刷新博客缓存（后台「更新博客」或三击左上角 logo）。', 'ok');
     await listAlbumIds(true);
@@ -1793,6 +1943,9 @@ function initApp() {
   if (localStorage.getItem(LS.compress) === 'false') $('compressUpload').checked = false;
   $('compressUpload').addEventListener('change', () =>
     localStorage.setItem(LS.compress, $('compressUpload').checked ? 'true' : 'false'));
+  const savedLevel = localStorage.getItem(LS.level);
+  if (savedLevel && $('compressLevel').querySelector('option[value="' + savedLevel + '"]')) $('compressLevel').value = savedLevel;
+  $('compressLevel').addEventListener('change', () => localStorage.setItem(LS.level, $('compressLevel').value));
 
   // 拖拽 / 选择 / 粘贴
   const dz = $('dropzone');
@@ -1859,6 +2012,7 @@ function initApp() {
   $('loadAlbumBtn').addEventListener('click', loadAlbumIntoForm);
   $('saveAlbumBtn').addEventListener('click', saveAlbum);
   $('recompressBtn').addEventListener('click', recompressAlbum);
+  $('recompressSiteBtn').addEventListener('click', recompressSiteImages);
   $('loadManageBtn').addEventListener('click', loadManage);
   $('deleteMarkedBtn').addEventListener('click', deleteMarked);
   $('deleteAlbumBtn').addEventListener('click', deleteAlbum);
