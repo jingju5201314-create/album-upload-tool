@@ -238,6 +238,10 @@
     <div class="manage-bar">
       <button class="btn btn-ghost btn-sm" id="uploadFilesBtn" type="button" disabled>上传到图床</button>
       <span id="uploadCount" class="hint" style="margin:0"></span>
+      <div class="remember-row" style="margin:0">
+        <input type="checkbox" id="compressUpload" checked>
+        <label for="compressUpload" style="margin:0;font-weight:400">上传前压缩（最长边 1600px → WebP）</label>
+      </div>
     </div>
     <div class="status" id="uploadStatus"></div>
 
@@ -441,7 +445,8 @@ const LS = {
   imgbedToken: 'album_tool_imgbed_token',
   imgbedBase: 'album_tool_imgbed_base',
   channel: 'album_tool_channel',
-  album: 'album_tool_last_album'
+  album: 'album_tool_last_album',
+  compress: 'album_tool_compress'
 };
 
 /* ---------- 通用工具 ---------- */
@@ -724,6 +729,64 @@ async function imgbedUpload(file, attempt) {
   }
 }
 
+/* ---------- 上传前压缩 ----------
+ * 博客相册页把 photos[].src 直接铺成网格，而且「点开大图」用的还是同一个地址，
+ * 所以上传原图（1440px / 200 KB–1 MB）会让相册页首屏涨到 4 MB 以上。
+ * 这里在上传前统一缩到最长边 1600px 并转 WebP，实测能省 70%–85% 体积。
+ * 任何一步失败都退回原文件，绝不因为压缩把上传搞挂。
+ */
+const COMPRESS_MAX_EDGE = 1600;
+const COMPRESS_QUALITY = 0.82;
+
+function compressWanted() {
+  const el = $('compressUpload');
+  return !el || el.checked;
+}
+
+async function maybeCompressImage(file) {
+  const pass = { file, note: '', saved: 0 };
+  if (!compressWanted()) return pass;
+  if (!file || !/^image\//i.test(file.type)) return pass;
+  // GIF 可能是动图，SVG 是矢量，都不动
+  if (/gif|svg/i.test(file.type)) return pass;
+
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, COMPRESS_MAX_EDGE / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    if (bmp.close) bmp.close();
+
+    let blob = null, outType = '';
+    for (const type of ['image/webp', 'image/jpeg']) {
+      const b = await new Promise(r => canvas.toBlob(r, type, COMPRESS_QUALITY));
+      if (b && b.size) { blob = b; outType = type; break; }
+    }
+    if (!blob) return pass;
+
+    // 已经很小 / 已经压过的图，压完反而更大就保留原图
+    if (blob.size >= file.size) {
+      return { file, note: '原图 ' + Math.round(file.size / 1024) + ' KB，压缩后反而更大，已保留原图', saved: 0 };
+    }
+
+    const ext = outType === 'image/webp' ? '.webp' : '.jpg';
+    const stem = String(file.name || 'image').replace(/\.[^./\\]+$/, '') || 'image';
+    return {
+      file: new File([blob], stem + ext, { type: outType }),
+      note: Math.round(file.size / 1024) + ' KB → ' + Math.round(blob.size / 1024) + ' KB' +
+            '（' + w + '×' + h + ' ' + (outType === 'image/webp' ? 'WebP' : 'JPEG') + '）',
+      saved: file.size - blob.size
+    };
+  } catch (e) {
+    return { file, note: '压缩失败，已按原图上传（' + e.message + '）', saved: 0 };
+  }
+}
+
 async function imgbedUploadOnce(file) {
   const token = $('imgbedToken').value.trim();
   if (!token) throw uploadError('请先填写图床上传令牌（ImgBed 后台 → API Token 管理）', false);
@@ -839,8 +902,10 @@ function renderPending() {
       const badge = document.createElement('div');
       badge.className = 'pbadge ' + it.status;
       badge.textContent = it.status === 'uploading' ? '上传中…' : (it.status === 'error' ? '失败' : '待上传');
-      if (it.status === 'error' && it.error) badge.title = it.error;
+      badge.title = [it.error, it.note].filter(Boolean).join('\n');
       wrap.appendChild(badge);
+    } else if (it.note) {
+      wrap.title = it.note;
     }
 
     grid.appendChild(wrap);
@@ -865,7 +930,7 @@ async function uploadPendingFiles() {
   $('uploadFilesBtn').disabled = true;
   clearStatus('uploadStatus');
 
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, savedBytes = 0;
   const queue = todo.slice();
 
   async function worker() {
@@ -875,6 +940,11 @@ async function uploadPendingFiles() {
       it.error = '';
       renderPending();
       try {
+        // 上传前压缩：相册页直接铺原图，不压会到几百 KB~1 MB 一张
+        const packed = await maybeCompressImage(it.file);
+        it.file = packed.file;
+        if (packed.note) it.note = packed.note;
+        savedBytes += packed.saved;
         const url = await imgbedUpload(it.file);
         it.url = url;
         it.status = 'ready';
@@ -893,10 +963,13 @@ async function uploadPendingFiles() {
 
   uploading = false;
   renderPending();
+  const savedNote = savedBytes > 0
+    ? '<br>🗜 上传前压缩已生效：合计省下 <b>' + (savedBytes / 1024 / 1024).toFixed(1) + ' MB</b>（鼠标移到缩略图上可看单张明细）'
+    : '';
   if (fail === 0) {
-    setStatus('uploadStatus', '✅ ' + ok + ' 张图片上传完成，已加入下方列表。', 'ok');
+    setStatus('uploadStatus', '✅ ' + ok + ' 张图片上传完成，已加入下方列表。' + savedNote, 'ok');
   } else {
-    setStatus('uploadStatus', '⚠️ 成功 ' + ok + ' 张，失败 ' + fail + ' 张。把鼠标移到失败的图片上可以看到原因，修好后可以再点一次「上传到图床」重试。', 'warn');
+    setStatus('uploadStatus', '⚠️ 成功 ' + ok + ' 张，失败 ' + fail + ' 张。把鼠标移到失败的图片上可以看到原因，修好后可以再点一次「上传到图床」重试。' + savedNote, 'warn');
   }
 }
 
@@ -1583,6 +1656,9 @@ function initApp() {
   });
   $('imgbedBase').addEventListener('change', () => localStorage.setItem(LS.imgbedBase, $('imgbedBase').value.trim()));
   $('uploadChannel').addEventListener('change', () => localStorage.setItem(LS.channel, $('uploadChannel').value));
+  if (localStorage.getItem(LS.compress) === 'false') $('compressUpload').checked = false;
+  $('compressUpload').addEventListener('change', () =>
+    localStorage.setItem(LS.compress, $('compressUpload').checked ? 'true' : 'false'));
 
   // 拖拽 / 选择 / 粘贴
   const dz = $('dropzone');
