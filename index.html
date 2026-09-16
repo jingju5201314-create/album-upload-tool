@@ -475,18 +475,52 @@ function showApp() {
   initApp();
 }
 
-function guardInit() {
-  if (proxyMode()) {
+const LOGIN_SUB_PROXY = '代理模式：输入代理口令即可（密钥保存在 Worker 服务端，这个页面不存任何令牌）';
+const LOGIN_SUB_NORMAL = '相册图片添加工具需要验证身份';
+
+async function guardInit() {
+  const proxy = proxyBase();
+
+  if (proxy) {
     // 代理模式：只需要口令，账号栏没用了
     $('loginUserLabel').style.display = 'none';
     $('loginUser').style.display = 'none';
-    $('loginSub').textContent = '代理模式：输入代理口令即可（密钥保存在 Worker 服务端，这个页面不存任何令牌）';
     $('loginPass').placeholder = '请输入代理口令';
   }
-  if (sessionStorage.getItem(LS_AUTH) === '1') showApp();
-  else {
-    $('loginOverlay').classList.remove('hidden');
-    $('appBody').style.display = 'none';
+
+  // 同一个标签页内已经登录过 → 直接进
+  if (sessionStorage.getItem(LS_AUTH) === '1') { showApp(); return; }
+
+  // 需要登录：先把登录框显示出来
+  $('loginOverlay').classList.remove('hidden');
+  $('appBody').style.display = 'none';
+  $('loginBtn').disabled = false;
+  $('loginSub').textContent = proxy ? LOGIN_SUB_PROXY : LOGIN_SUB_NORMAL;
+
+  // 代理模式 + 本地存过口令 → 静默校验一次，通过就免登录
+  // （sessionStorage 关掉浏览器就没了，靠这里才能做到“打开即用”）
+  if (proxy && toolKey()) {
+    $('loginBtn').disabled = true;
+    $('loginSub').textContent = '正在自动登录…';
+    try {
+      const r = await fetch(proxy + '/api/auth', { headers: { 'X-Tool-Key': toolKey() }, cache: 'no-store' });
+      if (r.ok) {
+        sessionStorage.setItem(LS_AUTH, '1');
+        showApp();
+        return;
+      }
+      if (r.status === 401) {
+        // 口令被改过了，清掉旧的，让用户重新输
+        localStorage.removeItem(LS.toolKey);
+        $('loginSub').textContent = '之前记下的口令已失效，请重新输入';
+      } else {
+        $('loginSub').textContent = '自动登录失败（代理返回 ' + r.status + '），请手动输入口令';
+      }
+    } catch (e) {
+      $('loginSub').textContent = '自动登录失败（连不上代理），请手动输入口令';
+    }
+    $('loginBtn').disabled = false;
+    $('loginPass').value = '';
   }
 }
 
