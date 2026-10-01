@@ -373,7 +373,16 @@
 
   <!-- ⑤ 日记 -->
   <div class="card">
-    <div class="card-head"><span class="step">5</span>上传日记</div>
+    <div class="card-head"><span class="step">5</span>上传 / 修改日记</div>
+
+    <div class="manage-bar" style="margin-top:0">
+      <button class="btn btn-ghost btn-sm" id="loadDiaryListBtn" type="button">📂 加载已有日记</button>
+      <select id="diaryPick" style="width:auto;min-width:200px">
+        <option value="">— 新建日记 —</option>
+      </select>
+    </div>
+    <div class="hint" id="diaryEditHint">当前：<b>新建日记</b>。点「加载已有日记」后可以从下拉里选一篇来改。</div>
+
     <div class="row">
       <div>
         <label for="diaryDate">日期（格式：2026-09-15）</label>
@@ -401,11 +410,12 @@
     <div class="grid" id="diaryPreview"></div>
     <label for="diaryContent">日记正文（支持 Markdown，每段空一行）</label>
     <textarea id="diaryContent" style="min-height:140px" placeholder="今天发生的事情……"></textarea>
-    <div style="margin-top:12px">
+    <div class="manage-bar" style="margin-top:12px">
       <button class="btn btn-primary" id="submitDiaryBtn">上传日记</button>
+      <button class="btn btn-danger btn-sm" id="diaryDeleteBtn" type="button" style="display:none">删除这篇日记</button>
     </div>
     <div class="status" id="diaryStatus"></div>
-    <div class="hint">日记会保存到 <code>diary/&lt;日期&gt;-&lt;序号&gt;/</code>，正文和图片<strong>一次提交</strong>完成。上传后需刷新博客缓存生效</div>
+    <div class="hint">新建时日记会存到 <code>diary/&lt;日期&gt;-&lt;序号&gt;/</code>；修改时<b>覆盖原来的文件</b>（文件夹名和 id 不变，所以已有链接不会失效）。正文和元信息<strong>一次提交</strong>完成。改完记得刷新博客缓存。</div>
   </div>
 </div>
 
@@ -2140,6 +2150,116 @@ function refreshDiaryPreview() {
   });
 }
 
+/* ---------- 日记：列出 / 加载已有 / 删除 ---------- */
+let editingDiaryFolder = '';   // 空字符串 = 新建模式
+let editingDiaryId = null;     // 修改模式下保留原来的 id
+
+async function listDiaries() {
+  if (!$('token').value.trim() && !proxyBase()) { setStatus('diaryStatus', '请先填写 GitHub Token', 'err'); return; }
+  $('loadDiaryListBtn').disabled = true;
+  setStatus('diaryStatus', '正在读取日记列表…', 'info');
+  try {
+    const items = await gh('/repos/' + OWNER_REPO + '/contents/diary?ref=' + BRANCH);
+    const dirs = (Array.isArray(items) ? items : [])
+      .filter(i => i.type === 'dir')
+      .map(i => i.name)
+      .sort()
+      .reverse();
+    const sel = $('diaryPick');
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">— 新建日记 —</option>';
+    dirs.forEach(name => {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name;
+      sel.appendChild(o);
+    });
+    if (dirs.indexOf(keep) >= 0) sel.value = keep;
+    setStatus('diaryStatus', dirs.length
+      ? '找到 <b>' + dirs.length + '</b> 篇日记，从下拉里选一篇就能改。'
+      : '还没有日记，直接新建吧。', 'ok');
+  } catch (e) {
+    setStatus('diaryStatus', '读取日记列表失败：' + esc(e.message), 'err');
+  } finally {
+    $('loadDiaryListBtn').disabled = false;
+  }
+}
+
+function resetDiaryForm() {
+  editingDiaryFolder = '';
+  editingDiaryId = null;
+  $('diaryDate').value = todayStr();
+  $('diaryTime').value = '';
+  $('diaryMood').value = '';
+  $('diaryLocation').value = '';
+  $('diaryTags').value = '';
+  $('diaryImages').value = '';
+  $('diaryContent').value = '';
+  $('submitDiaryBtn').textContent = '上传日记';
+  $('diaryDeleteBtn').style.display = 'none';
+  $('diaryEditHint').innerHTML = '当前：<b>新建日记</b>。点「加载已有日记」后可以从下拉里选一篇来改。';
+  refreshDiaryPreview();
+}
+
+async function loadDiaryIntoForm(folder) {
+  if (!folder) { resetDiaryForm(); clearStatus('diaryStatus'); return; }
+  setStatus('diaryStatus', '正在读取 <b>' + esc(folder) + '</b> …', 'info');
+  try {
+    const base = '/repos/' + OWNER_REPO + '/contents/diary/' + encodeURIComponent(folder) + '/';
+    const res = await Promise.all([
+      gh(base + 'info.json?ref=' + BRANCH),
+      gh(base + 'content.md?ref=' + BRANCH),
+    ]);
+    const info = JSON.parse(base64ToUtf8(res[0].content));
+    const md = base64ToUtf8(res[1].content).replace(/\s+$/, '');
+
+    const d = String(info.date || '');
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?/);
+    $('diaryDate').value = m ? m[1] : todayStr();
+    $('diaryTime').value = (m && m[2]) ? m[2] : '';
+    $('diaryMood').value = info.mood || '';
+    $('diaryLocation').value = info.location || '';
+    $('diaryTags').value = Array.isArray(info.tags) ? info.tags.join(', ') : '';
+    $('diaryImages').value = Array.isArray(info.images) ? info.images.join('\n') : '';
+    $('diaryContent').value = md;
+
+    editingDiaryFolder = folder;
+    editingDiaryId = (info.id === undefined || info.id === null) ? null : info.id;
+    $('submitDiaryBtn').textContent = '保存修改';
+    $('diaryDeleteBtn').style.display = '';
+    $('diaryEditHint').innerHTML = '正在修改：<b>' + esc(folder) + '</b>' +
+      (editingDiaryId !== null ? '（id ' + esc(String(editingDiaryId)) + '）' : '') +
+      ' —— 保存会覆盖原文件，文件夹名和 id 保持不变，所以已有链接不会失效。';
+    refreshDiaryPreview();
+    clearStatus('diaryStatus');
+  } catch (e) {
+    setStatus('diaryStatus', '读取失败：' + esc(e.message), 'err');
+  }
+}
+
+async function deleteDiary() {
+  const folder = editingDiaryFolder;
+  if (!folder) return;
+  if (!confirm('确定删除日记「' + folder + '」？\n\n会删掉 diary/' + folder + '/ 下的 info.json 和 content.md，不可恢复。')) return;
+  $('diaryDeleteBtn').disabled = true;
+  setStatus('diaryStatus', '正在删除…', 'info');
+  try {
+    await commitChanges({
+      message: 'diary: delete ' + folder,
+      upserts: [],
+      deletions: ['diary/' + folder + '/info.json', 'diary/' + folder + '/content.md']
+    });
+    $('diaryPick').value = '';
+    resetDiaryForm();
+    setStatus('diaryStatus', '✅ 已删除日记 <code>' + esc(folder) + '</code>。别忘了刷新博客缓存。', 'ok');
+    await listDiaries();
+  } catch (e) {
+    setStatus('diaryStatus', '删除失败：' + esc(e.message), 'err');
+  } finally {
+    $('diaryDeleteBtn').disabled = false;
+  }
+}
+
 async function submitDiary() {
   const dateStr = $('diaryDate').value.trim();
   const timeStr = $('diaryTime').value.trim();
@@ -2149,7 +2269,7 @@ async function submitDiary() {
   const location = $('diaryLocation').value.trim();
   const tags = parseTags($('diaryTags').value);
 
-  if (!$('token').value.trim()) { setStatus('diaryStatus', '请先填写 GitHub Token', 'err'); return; }
+  if (!$('token').value.trim() && !proxyBase()) { setStatus('diaryStatus', '请先填写 GitHub Token（或在「高级选项」里填代理地址）', 'err'); return; }
   if (!dateStr) { setStatus('diaryStatus', '请填写日期', 'err'); return; }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { setStatus('diaryStatus', '日期格式应为 YYYY-MM-DD，例如 2026-09-15', 'err'); return; }
   if (!content && !rawImages.length) { setStatus('diaryStatus', '请至少填写正文或添加一张图片', 'err'); return; }
@@ -2168,8 +2288,21 @@ async function submitDiary() {
   $('submitDiaryBtn').disabled = true;
   setStatus('diaryStatus', '正在上传…', 'info');
   try {
-    const id = await nextDiaryId();          // 1 次请求（原版是 N 次）
-    const folder = dateStr + '-' + id;
+    const isEdit = !!editingDiaryFolder;
+    let id, folder;
+    if (isEdit) {
+      // 修改模式：沿用原来的文件夹名和 id（改名会让已有链接失效）
+      folder = editingDiaryFolder;
+      if (editingDiaryId !== null) {
+        id = editingDiaryId;
+      } else {
+        const mm = folder.match(/-(\d+)$/);
+        id = mm ? parseInt(mm[1], 10) : 1;
+      }
+    } else {
+      id = await nextDiaryId();          // 1 次请求（原版是 N 次）
+      folder = dateStr + '-' + id;
+    }
 
     let isoDate;
     if (timeStr && /^\d{1,2}:\d{2}$/.test(timeStr)) isoDate = dateStr + 'T' + timeStr + ':00+08:00';
@@ -2181,27 +2314,27 @@ async function submitDiary() {
 
     // 两个文件一次提交，不会出现「有 info 没正文」的中间态
     const commit = await commitChanges({
-      message: 'diary: add ' + folder,
+      message: 'diary: ' + (isEdit ? 'update ' : 'add ') + folder,
       upserts: [
         { path: 'diary/' + folder + '/info.json', content: infoContent },
         { path: 'diary/' + folder + '/content.md', content: mdContent }
       ]
     });
 
+    if (isEdit) {
+      // 修改模式：保留当前选择，方便继续改
+      $('diaryEditHint').innerHTML = '正在修改：<b>' + esc(folder) + '</b> —— 已保存。';
+      try { await listDiaries(); $('diaryPick').value = folder; } catch (e) { /* 列表刷新失败不影响保存结果 */ }
+    } else {
+      $('diaryPick').value = '';
+      resetDiaryForm();
+    }
+
     setStatus('diaryStatus',
-      '✅ 日记已上传（<code>' + esc(folder) + '</code>）' +
+      (isEdit ? '✅ 日记已保存' : '✅ 日记已上传') + '（<code>' + esc(folder) + '</code>）' +
       (images.length ? '，含 ' + images.length + ' 张图片' : '') +
       '。<br>正文和元信息在同一个提交里，不会出现半成品状态。' +
       refreshTip(commit.sha), 'ok');
-
-    $('diaryDate').value = todayStr();
-    $('diaryTime').value = '';
-    $('diaryMood').value = '';
-    $('diaryLocation').value = '';
-    $('diaryTags').value = '';
-    $('diaryImages').value = '';
-    $('diaryContent').value = '';
-    refreshDiaryPreview();
   } catch (e) {
     setStatus('diaryStatus', '上传失败：' + esc(e.message), 'err');
   } finally {
@@ -2343,6 +2476,9 @@ function initApp() {
   $('cleanCardsBtn').addEventListener('click', cleanHomeCards);
   $('submitDiaryBtn').addEventListener('click', submitDiary);
   $('diaryImages').addEventListener('input', refreshDiaryPreview);
+  $('loadDiaryListBtn').addEventListener('click', listDiaries);
+  $('diaryPick').addEventListener('change', () => loadDiaryIntoForm($('diaryPick').value));
+  $('diaryDeleteBtn').addEventListener('click', deleteDiary);
 
   // 默认值
   $('diaryDate').value = todayStr();
@@ -2350,8 +2486,8 @@ function initApp() {
   renderPending();
   refreshDiaryPreview();
 
-  // 首次加载相册列表 + 若已填相册名则读一次
-  if ($('token').value.trim()) {
+  // 首次加载相册列表 + 若已填相册名则读一次（代理模式下不需要 token）
+  if ($('token').value.trim() || proxyBase()) {
     loadAlbums();
     if ($('albumId').value.trim()) loadAlbumIntoForm();
   }
