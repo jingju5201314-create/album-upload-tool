@@ -383,6 +383,10 @@
     </div>
     <div class="hint" id="diaryEditHint">当前：<b>新建日记</b>。点「加载已有日记」后可以从下拉里选一篇来改。</div>
 
+    <label for="diaryTitle">标题（可选）</label>
+    <input type="text" id="diaryTitle" placeholder="例如：搬家第一天">
+    <div class="hint">博客前端的日记卡片<b>只渲染正文、图片、标签、日期、地点、心情</b>，没有独立的标题字段。所以标题会以 Markdown 小标题（<code>### 标题</code>）写在正文最前面 —— 这样能正常显示出来。</div>
+
     <div class="row">
       <div>
         <label for="diaryDate">日期（格式：2026-09-15）</label>
@@ -2185,11 +2189,43 @@ async function listDiaries() {
   }
 }
 
+// 博客的日记卡片没有独立标题字段（只渲染 正文/图片/标签/日期/地点/心情），
+// 所以标题以 Markdown 小标题的形式写在正文最前面；同时在 info.json 里留一份 title，
+// 编辑时用它回填输入框，也能把正文开头那行标题去掉、避免重复。
+const DIARY_TITLE_PREFIX = '### ';
+
+function composeDiaryMarkdown(title, body) {
+  const t = String(title || '').trim();
+  const b = String(body || '').replace(/\s+$/, '');
+  if (!t) return b ? b + '\n' : '';
+  return DIARY_TITLE_PREFIX + t + '\n\n' + (b ? b + '\n' : '');
+}
+
+function splitDiaryMarkdown(md, infoTitle) {
+  const text = String(md || '').replace(/\s+$/, '');
+  const declared = String(infoTitle || '').trim();
+
+  if (declared) {
+    // 有 title 字段：把正文开头那行同名标题去掉，避免正文里重复显示
+    const esc = declared.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('^#{1,6}[ \\t]+' + esc + '[ \\t]*\\n*');
+    return { title: declared, body: text.replace(re, '').replace(/^\s+/, '').replace(/\s+$/, '') };
+  }
+
+  // 没有 title 字段（比如手写的日记）：把开头那行 ATX 标题当作标题
+  const m = text.match(/^#{1,6}[ \t]+(.+?)[ \t]*\n+([\s\S]*)$/);
+  if (m) return { title: m[1].trim(), body: m[2].replace(/\s+$/, '') };
+  const only = text.match(/^#{1,6}[ \t]+(.+?)[ \t]*$/);
+  if (only) return { title: only[1].trim(), body: '' };
+  return { title: '', body: text };
+}
+
 function resetDiaryForm() {
   editingDiaryFolder = '';
   editingDiaryId = null;
   $('diaryDate').value = todayStr();
   $('diaryTime').value = '';
+  $('diaryTitle').value = '';
   $('diaryMood').value = '';
   $('diaryLocation').value = '';
   $('diaryTags').value = '';
@@ -2211,17 +2247,18 @@ async function loadDiaryIntoForm(folder) {
       gh(base + 'content.md?ref=' + BRANCH),
     ]);
     const info = JSON.parse(base64ToUtf8(res[0].content));
-    const md = base64ToUtf8(res[1].content).replace(/\s+$/, '');
+    const split = splitDiaryMarkdown(base64ToUtf8(res[1].content), info.title);
 
     const d = String(info.date || '');
     const m = d.match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?/);
     $('diaryDate').value = m ? m[1] : todayStr();
     $('diaryTime').value = (m && m[2]) ? m[2] : '';
+    $('diaryTitle').value = split.title;
     $('diaryMood').value = info.mood || '';
     $('diaryLocation').value = info.location || '';
     $('diaryTags').value = Array.isArray(info.tags) ? info.tags.join(', ') : '';
     $('diaryImages').value = Array.isArray(info.images) ? info.images.join('\n') : '';
-    $('diaryContent').value = md;
+    $('diaryContent').value = split.body;
 
     editingDiaryFolder = folder;
     editingDiaryId = (info.id === undefined || info.id === null) ? null : info.id;
@@ -2264,6 +2301,7 @@ async function submitDiary() {
   const dateStr = $('diaryDate').value.trim();
   const timeStr = $('diaryTime').value.trim();
   const content = $('diaryContent').value.trim();
+  const title = $('diaryTitle').value.trim();
   const rawImages = $('diaryImages').value.split('\n').map(s => s.trim()).filter(Boolean);
   const mood = $('diaryMood').value.trim();
   const location = $('diaryLocation').value.trim();
@@ -2272,7 +2310,7 @@ async function submitDiary() {
   if (!$('token').value.trim() && !proxyBase()) { setStatus('diaryStatus', '请先填写 GitHub Token（或在「高级选项」里填代理地址）', 'err'); return; }
   if (!dateStr) { setStatus('diaryStatus', '请填写日期', 'err'); return; }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { setStatus('diaryStatus', '日期格式应为 YYYY-MM-DD，例如 2026-09-15', 'err'); return; }
-  if (!content && !rawImages.length) { setStatus('diaryStatus', '请至少填写正文或添加一张图片', 'err'); return; }
+  if (!content && !title && !rawImages.length) { setStatus('diaryStatus', '请至少填写标题、正文或添加一张图片', 'err'); return; }
 
   const images = [];
   const badImages = [];
@@ -2309,8 +2347,9 @@ async function submitDiary() {
     else isoDate = dateStr + 'T12:00:00+08:00';
 
     const info = { id, date: isoDate, images, location, mood, tags };
+    if (title) info.title = title;              // 给工具自己回填用；博客前端会忽略它
     const infoContent = stringifyJson(info);
-    const mdContent = content ? content + '\n' : '';
+    const mdContent = composeDiaryMarkdown(title, content);
 
     // 两个文件一次提交，不会出现「有 info 没正文」的中间态
     const commit = await commitChanges({
