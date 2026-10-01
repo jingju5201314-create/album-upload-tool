@@ -348,6 +348,13 @@
     <div class="status" id="siteImgStatus"></div>
     <div class="hint">处理 <code>settings.json</code> 里引用的图片：<b>首页轮播、头像、导航图标、站点 logo、favicon</b>。按用途分别压缩 —— 轮播按最长边 1280px（背景带模糊遮罩，1280 足够），图标类按 256px（favicon 和 14px 小图标用大图纯属浪费），压缩后<b>原地替换引用</b>。压缩无收益的图原样保留。</div>
 
+    <div class="manage-bar" style="margin-top:16px">
+      <button class="btn btn-ghost" id="refreshBlogBtn" type="button">🔄 刷新博客缓存</button>
+      <span class="hint" style="margin:0">改完内容点一下，不用等缓存自己过期</span>
+    </div>
+    <div class="status" id="refreshStatus"></div>
+    <div class="hint">博客内容会被缓存，改完 <code>settings.json</code> / 文章 / 相册后如果不立刻生效，点这个按钮就行 —— 等同于后台的「更新博客」，也等同于在博客页面 3 秒内点 3 次左上角 logo。<b>不需要你登录后台</b>（管理员凭据存在 Worker 的加密环境变量里）。</div>
+
     <details>
       <summary>危险操作：删除整个相册</summary>
       <div class="adv-body">
@@ -1751,6 +1758,47 @@ async function generateCardThumbs() {
   }
 }
 
+/* ---------- 刷新博客缓存 ----------
+ * 博客内容会被缓存，而且各节点各自缓存（历史上出现过新旧不一致）。
+ * 这里调 Worker 的 /api/refresh-blog：Worker 用管理员凭据登录后台 → 触发「更新博客」。
+ * 管理员账号密码只存在 Worker 的服务端加密环境变量里，这个页面拿不到。
+ */
+async function refreshBlogCache() {
+  const proxy = proxyBase();
+  if (!proxy) {
+    setStatus('refreshStatus', '这个功能需要<b>代理模式</b> —— 管理员凭据存在 Worker 的服务端，页面这边没有。请在「① 令牌设置 → 高级选项 → 代理地址」里填上 Worker 地址，刷新页面后再试。', 'err');
+    return;
+  }
+  const btn = $('refreshBlogBtn');
+  btn.disabled = true;
+  clearStatus('refreshStatus');
+  setStatus('refreshStatus', '正在刷新博客缓存…', 'info');
+  try {
+    const r = await fetch(proxy + '/api/refresh-blog', {
+      method: 'POST',
+      headers: { 'X-Tool-Key': toolKey() },
+      cache: 'no-store'
+    });
+    const text = await r.text();
+    let j = null;
+    try { j = JSON.parse(text); } catch (e) { /* 非 JSON */ }
+
+    if (r.ok && j && j.success) {
+      const sha = j.result && j.result.commitSha ? String(j.result.commitSha).slice(0, 7) : '';
+      setStatus('refreshStatus',
+        '✅ 博客缓存已刷新' + (sha ? '（commit <b>' + esc(sha) + '</b>）' : '') +
+        '。<br>等 5–10 秒后刷新博客页面就能看到最新内容。', 'ok');
+    } else {
+      const msg = (j && (j.error || j.detail)) || text.slice(0, 180) || ('HTTP ' + r.status);
+      setStatus('refreshStatus', '❌ 刷新失败：' + esc(String(msg)), 'err');
+    }
+  } catch (e) {
+    setStatus('refreshStatus', '❌ 连不上代理：' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ---------- 压缩重传已有相册 ----------
  * 历史图片是 API 直传上去的，没走后台的「默认压缩 / 转 WebP」，所以常有 200 KB–1 MB 一张，
  * 而相册页是直接铺 photos[].src 的，于是首屏能到 4 MB 以上。
@@ -2288,6 +2336,7 @@ function initApp() {
   $('recompressBtn').addEventListener('click', recompressAlbum);
   $('thumbBtn').addEventListener('click', generateCardThumbs);
   $('recompressSiteBtn').addEventListener('click', recompressSiteImages);
+  $('refreshBlogBtn').addEventListener('click', refreshBlogCache);
   $('loadManageBtn').addEventListener('click', loadManage);
   $('deleteMarkedBtn').addEventListener('click', deleteMarked);
   $('deleteAlbumBtn').addEventListener('click', deleteAlbum);
